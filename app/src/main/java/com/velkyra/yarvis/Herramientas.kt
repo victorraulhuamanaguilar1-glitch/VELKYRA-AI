@@ -30,7 +30,7 @@ object Contactos {
     fun buscar(ctx: Context, objetivo: String, estricto: Boolean = false): Contacto? {
         if (!ctx.tiene(Manifest.permission.READ_CONTACTS)) return null
         val obj = Frase.normalizar(objetivo)
-            .replace(Regex("^(mi |a mi |al |a la |a )"), "")
+            .replace(Regex("^(a mi |mi |al |a la |a |la |el |los |las )"), "")
             .trim()
         if (obj.isEmpty()) return null
         val c = ctx.contentResolver.query(

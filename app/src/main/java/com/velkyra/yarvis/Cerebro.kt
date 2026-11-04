@@ -60,24 +60,62 @@ class Cerebro(private val ctx: Context) {
         return R(pregunta, seguir = true)
     }
 
+    /** Quita la palabra de activación y frases de cortesía: «Yarvis, por favor, ¿podrías llamar a…?» → «llamar a…» */
+    fun limpiarOrden(texto: String): String {
+        var t = texto.trim().trimStart('¿', '¡', ',', '.', ' ')
+        val prefijos = listOf(
+            "(oye|hey|ey|hola)\\s*,?\\s+",
+            "(yarvis|jarvis|llarvis|harvis|${Regex.escape(Prefs.palabraActivacion)})\\s*[,.]?\\s*",
+            "(por favor|porfa|porfavor)\\s*,?\\s+",
+            "(puedes|podr[ií]as|me puedes|me podr[ií]as|quiero que|quisiera que|necesito que|deseo que|hazme el favor de|ay[uú]dame a|te pido que)\\s+",
+            "(me\\s+)?(ayudas a|haces el favor de)\\s+"
+        )
+        var cambio = true
+        while (cambio) {
+            cambio = false
+            for (p in prefijos) {
+                val n = t.replaceFirst(Regex("(?i)^$p"), "")
+                if (n != t) { t = n.trimStart('¿', '¡', ',', ' '); cambio = true }
+            }
+        }
+        t = t.replace(Regex("(?i)[,\\s]+(por favor|porfa)[?.!]*$"), "").trimEnd('?', '!', ' ')
+        return t.ifBlank { texto }
+    }
+
+    private val rAccion = Regex("(llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa)")
+
     fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
-        val f = Frase(texto)
+        val limpio = limpiarOrden(texto)
+        val f = Frase(limpio)
         val r = try {
             local(f, cb)
         } catch (e: Exception) {
-            R("Tuve un inconveniente al ejecutar esa orden, $tr.")
+            R("Tuve un inconveniente al ejecutar esa orden, $tr.", detalle = e.javaClass.simpleName)
         }
         when {
             r === ASYNC -> {}
             r != null -> cb(r)
-            else -> preguntarIA(texto, cb)
+            // Parece una orden que no reconocí: la IA la traduce a una orden que sí sé ejecutar
+            rAccion.containsMatchIn(f.t) && CerebroIA.disponible() -> fondo(cb) {
+                val canonica = try { CerebroIA.interpretar(limpio) } catch (_: Exception) { null }
+                val r2 = if (canonica != null) try { local(Frase(limpiarOrden(canonica)), cb) } catch (_: Exception) { null } else null
+                when {
+                    r2 === ASYNC -> ASYNC
+                    r2 != null -> r2
+                    else -> {
+                        val rr = try { CerebroIA.preguntar(limpio) } catch (e: Exception) { return@fondo R(CerebroIA.mensajeError(e), cerrar = true, detalle = CerebroIA.detalle(e)) }
+                        R(rr, seguir = rr.trim().endsWith("?"))
+                    }
+                }
+            }
+            else -> preguntarIA(limpio, cb)
         }
     }
 
     private fun fondo(cb: (Yarvis.Respuesta) -> Unit, tarea: () -> Yarvis.Respuesta): Yarvis.Respuesta {
         Thread {
             val r = try { tarea() } catch (e: Exception) { R("No pude completar eso, $tr.") }
-            cb(r)
+            if (r !== ASYNC) cb(r)
         }.start()
         return ASYNC
     }
@@ -312,11 +350,14 @@ class Cerebro(private val ctx: Context) {
         if (f.tiene("(lee|leeme|que dicen|tengo|revisa) (mis |los |algun |algunos )?(mensajes|notificaciones|whatsapps?)|mensajes nuevos|quien me escribio|alguien me escribio")) {
             return leerNotificaciones()
         }
+        responderMensaje(f)?.let { return it }
         mensaje(f)?.let { return it }
 
         // --- Llamadas ----------------------------------------------------------
-        Regex("^(?:llama|llamar|llamale|marca|marcale|marcar|telefonea|comunicame con|haz una llamada a)\\s+(?:a\\s+|al\\s+|a la\\s+)?(.+?)(?:\\s+por favor)?$").find(t)?.let { m ->
-            return llamar(f.originalDeGrupo(m, 1))
+        Regex("^(?:llama|llamar|llames|llamale|llamarle|marca|marcale|marcar|marques|telefonea|comunicame con|contacta a|hazme una llamada|haz una llamada|has una llamada|realiza una llamada|realizar una llamada|hacer una llamada|haz llamada|una llamada)(?:\\s+telefonica)?\\s+(?:por\\s+(telefono|celular|whatsapp|wasap|wsp|guasap)\\s+)?(?:a\\s+|al\\s+|a la\\s+|con\\s+|para\\s+)?(.+?)(?:\\s+por\\s+(telefono|celular|whatsapp|wasap|wsp|guasap))?$").find(t)?.let { m ->
+            val porWa = (m.groupValues[1] + m.groupValues[3]).let { it.contains("wa") || it.contains("wsp") || it.contains("whats") }
+            val quien = f.originalDeGrupo(m, 2)
+            return if (porWa) llamarWhatsapp(quien) else llamar(quien)
         }
 
         // --- Hora, fecha y cálculos de días ----------------------------------
@@ -582,6 +623,59 @@ class Cerebro(private val ctx: Context) {
         return enviarMensaje(c, texto, porSms)
     }
 
+    /** «Responde a Juan que ya voy», «respóndele que sí», «contesta el mensaje de Rosa diciendo que mañana». */
+    private fun responderMensaje(f: Frase): Yarvis.Respuesta? {
+        val t = f.t
+        val m = Regex("^(?:responde|respondele|responder|contesta|contestale|contestar|respondele a|contestale a)\\b\\s*(.*)$").find(t) ?: return null
+        var resto = m.groupValues[1]
+        val inicio = m.groups[1]!!.range.first
+        var quien: String? = null
+        var texto: String
+        // ¿Dice a quién? «a Juan / al mensaje de Juan / el whatsapp de Juan»
+        val dest = Regex("^(?:(?:a|al)\\s+)?(?:(?:el|al|ultimo)\\s+)?(?:mensaje|whatsapp|wasap|chat)?\\s*(?:de|a|al)\\s+(.+?)\\s+(?:que|diciendo(?:le)?(?: que)?|con)\\s+(.+)$").find(resto)
+            ?: Regex("^(?:a|al)\\s+(.+?)\\s+(?:que|diciendo(?:le)?(?: que)?|con)\\s+(.+)$").find(resto)
+        if (dest != null) {
+            quien = f.originalEntre(inicio + dest.groups[1]!!.range.first, inicio + dest.groups[1]!!.range.last + 1)
+            texto = f.originalEntre(inicio + dest.groups[2]!!.range.first)
+        } else {
+            resto = resto.replace(Regex("^(?:(?:el|al|ultimo)\\s+)?(?:mensaje|whatsapp|wasap)\\s*"), "")
+            val q = Regex("^(?:que|diciendo(?:le)?(?: que)?|con)\\s+").find(resto)
+            texto = if (resto.isBlank()) "" else f.originalEntre(t.length - resto.length + (q?.range?.last?.plus(1) ?: 0))
+        }
+        texto = texto.trim().trim('"', '«', '»')
+        if (!ServicioNotificaciones.activo) {
+            lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            return R("Para responder mensajes necesito acceso a sus notificaciones, $tr. Active YARVIS en la pantalla que le abrí.", cerrar = true)
+        }
+        val destino = quien ?: ServicioNotificaciones.ultimoRemitente()
+            ?: return R("No tengo mensajes recientes para responder, $tr. Puedo enviarle uno nuevo: diga, por ejemplo, manda un WhatsApp a Juan.")
+        if (texto.isBlank()) return esperar("¿Qué le respondo a $destino, $tr?") { f2 -> enviarRespuesta(destino, f2.original) }
+        return enviarRespuesta(destino, texto)
+    }
+
+    private fun enviarRespuesta(quien: String, texto: String): Yarvis.Respuesta {
+        val limpio = texto.trim().replace(Regex("(?i)^(dile\\s+)?que\\s+"), "").replaceFirstChar { it.uppercase() }
+        val nombre = ServicioNotificaciones.responder(ctx, quien, limpio)
+        if (nombre != null) return R("Respondido a $nombre: «$limpio».")
+        // No hay notificación para responder: se envía como mensaje nuevo por WhatsApp
+        val c = resolverContacto(quien) ?: return R("No encontré un mensaje reciente de $quien ni el contacto en su agenda, $tr.")
+        return enviarMensaje(c, limpio, false)
+    }
+
+    private fun llamarWhatsapp(quien: String): Yarvis.Respuesta {
+        val c = resolverContacto(quien) ?: return if (!ctx.tiene(Manifest.permission.READ_CONTACTS))
+            R("Necesito permiso para ver sus contactos, $tr.") else R("No encontré a $quien en sus contactos, $tr.")
+        if (!ServicioAccesibilidad.activo) {
+            return R("Para llamar por WhatsApp sin tocar la pantalla necesito el permiso de accesibilidad, $tr. Mientras tanto le hago una llamada normal.") {
+                lanzar(Intent(if (ctx.tiene(Manifest.permission.CALL_PHONE)) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(c.numero))))
+            }
+        }
+        ServicioAccesibilidad.prepararLlamadaWhatsapp()
+        val url = "https://api.whatsapp.com/send?phone=${Contactos.internacional(c.numero)}"
+        val ok = listOf("com.whatsapp", "com.whatsapp.w4b").any { pkg -> lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg)) }
+        return if (ok) R("Llamando a ${c.nombre} por WhatsApp, $tr.", cerrar = true) else R("No encontré WhatsApp en este celular, $tr.")
+    }
+
     private fun quitarCanal(s: String): String {
         var r = s.trim()
         r = r.replace(Regex("(?i)^(por|en|via|al)?\\s*(whatsapp|whats app|wasap|wasa|guasap|wsp|sms|mensaje de texto)\\s+"), "")
@@ -680,7 +774,11 @@ class Cerebro(private val ctx: Context) {
             return when (m.groupValues[2]) {
                 "youtube", "you tube" -> youtube(q, cb)
                 "tiktok", "tik tok" -> { abrirUrl("https://www.tiktok.com/search?q=" + Uri.encode(q)); R("Buscando $q en TikTok, $tr.") }
-                "facebook" -> { abrirUrl("https://www.facebook.com/search/top?q=" + Uri.encode(q)); R("Buscando $q en Facebook, $tr.") }
+                "facebook" -> {
+                    if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
+                    abrirUrl("https://www.facebook.com/search/videos/?q=" + Uri.encode(q))
+                    R("Le muestro los videos de $q en Facebook, $tr. Toque el que desee y lo reproduzco.", cerrar = true)
+                }
                 "instagram" -> { abrirUrl("https://www.instagram.com/explore/search/keyword/?q=" + Uri.encode(q)); R("Buscando $q en Instagram, $tr.") }
                 "spotify" -> {
                     if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(q)))))
@@ -707,19 +805,24 @@ class Cerebro(private val ctx: Context) {
     /** Busca el primer video en YouTube y lo reproduce directamente. */
     private fun youtube(q: String, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta = fondo(cb) {
         val id = try {
-            val c = URL("https://www.youtube.com/results?search_query=" + Uri.encode(q)).openConnection() as HttpURLConnection
-            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36")
+            val c = URL("https://www.youtube.com/results?sp=EgIQAQ%253D%253D&search_query=" + Uri.encode(q)).openConnection() as HttpURLConnection
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
             c.setRequestProperty("Accept-Language", "es-PE,es;q=0.9")
+            c.setRequestProperty("Cookie", "CONSENT=YES+1; SOCS=CAI")
             c.connectTimeout = 10000
             c.readTimeout = 12000
             val html = c.inputStream.bufferedReader().use { it.readText() }
             c.disconnect()
-            Regex("\"videoId\":\"([\\w-]{11})\"").find(html)?.groupValues?.get(1)
+            (Regex("\"videoRenderer\":\\{\"videoId\":\"([\\w-]{11})\"").find(html)
+                ?: Regex("\"videoId\":\"([\\w-]{11})\"").find(html)
+                ?: Regex("/watch\\?v=([\\w-]{11})").find(html))?.groupValues?.get(1)
         } catch (_: Exception) {
             null
         }
         if (id != null) {
-            val app = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$id"))
+            if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
+            val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$id")).setPackage("com.google.android.youtube")
+                .putExtra("force_fullscreen", false).putExtra("finish_on_ended", true)
             principal.post { if (!lanzar(app)) abrirUrl("https://www.youtube.com/watch?v=$id") }
             R("Reproduciendo $q en YouTube, $tr.")
         } else {

@@ -141,10 +141,13 @@ object CerebroIA {
     ).containsMatchIn(Frase.normalizar(p))
 
     /** Pregunta a la IA. Se llama desde un hilo secundario. */
-    fun preguntar(pregunta: String, extra: String? = null, buscar: Boolean = necesitaBusqueda(pregunta)): String {
+    fun preguntar(
+        pregunta: String, extra: String? = null, buscar: Boolean = necesitaBusqueda(pregunta),
+        sistemaFijo: String? = null, recordar: Boolean = true
+    ): String {
         if (!hayInternet()) throw IOException("sin red")
-        val copia = synchronized(historial) { historial.toList() }
-        val sistema = instrucciones(extra)
+        val copia = if (recordar) synchronized(historial) { historial.toList() } else emptyList()
+        val sistema = sistemaFijo ?: instrucciones(extra)
         // Datos actuales → primero Gemini (busca en Google). Lo demás → Groq y Cerebras (más cupo).
         val orden = if (buscar) listOf(Gemini, groq, cerebras) else listOf(groq, cerebras, Gemini)
         var ultimo: Exception? = null
@@ -166,7 +169,7 @@ object CerebroIA {
                         var r = p.llamar(modelo, sistema, copia, pregunta, conBusqueda)
                         if (r.isBlank()) throw ErrorIA(204, "respuesta vacía")
                         if (!buscar && p !== Gemini) r = r.trim()
-                        guardar(pregunta, r)
+                        if (recordar) guardar(pregunta, r)
                         ultimoProveedor = "${p.nombre} · $modelo"
                         return r
                     } catch (e: ErrorIA) {
@@ -201,6 +204,45 @@ object CerebroIA {
         throw ultimo ?: SinCupo()
     }
 
+    private val PROMPT_INTERPRETE = """
+        Eres el intérprete de órdenes de un asistente de voz para Android. Convierte lo que dice el usuario en UNA sola
+        orden canónica en español, copiando los nombres y textos tal como los dijo. Formatos permitidos:
+        llama a NOMBRE
+        llama por whatsapp a NOMBRE
+        manda un whatsapp a NOMBRE que MENSAJE
+        manda un sms a NOMBRE que MENSAJE
+        responde a NOMBRE que MENSAJE
+        responde que MENSAJE
+        lee mis mensajes
+        reproduce BÚSQUEDA en youtube
+        reproduce BÚSQUEDA en facebook
+        reproduce BÚSQUEDA en tiktok
+        reproduce BÚSQUEDA en spotify
+        abre APLICACIÓN
+        busca en google BÚSQUEDA
+        pon una alarma a las HORA
+        temporizador de TIEMPO
+        recuérdame CUÁNDO TAREA
+        llévame a LUGAR
+        enciende la linterna
+        apaga la linterna
+        sube el volumen
+        baja el volumen
+        toma una foto
+        pausa la música
+        siguiente canción
+        Si el usuario NO está pidiendo una acción del celular (es una pregunta, conversación o petición de información),
+        responde exactamente: NINGUNA
+        Responde solo con la orden, sin comillas ni explicación.
+    """.trimIndent()
+
+    /** Traduce una frase libre a una orden que YARVIS sabe ejecutar. Null si no es una orden. */
+    fun interpretar(texto: String): String? {
+        val r = preguntar(texto, buscar = false, sistemaFijo = PROMPT_INTERPRETE, recordar = false)
+            .lines().firstOrNull { it.isNotBlank() }?.trim()?.trim('"', '«', '»', '.', ' ') ?: return null
+        return if (r.isBlank() || r.uppercase().contains("NINGUNA")) null else r
+    }
+
     /** Agrega al contexto de la conversación algo que YARVIS dijo sin la IA (por ejemplo, las noticias). */
     fun recordar(pregunta: String, respuesta: String) = guardar(pregunta, respuesta)
 
@@ -228,6 +270,9 @@ object CerebroIA {
             Escribe los números y siglas de forma que se lean bien en voz alta.
             Puedes conversar de cualquier tema: tecnología, ciencia, historia, salud, finanzas, cultura, entretenimiento, etc.
             Si algo requiere un profesional (salud, leyes, dinero), da información útil y sugiere consultarlo.
+            IMPORTANTE: tú SÍ controlas este celular (llamadas, WhatsApp, SMS, música, videos, apps, alarmas). Nunca digas que no puedes
+            acceder a otras aplicaciones, hacer llamadas o enviar mensajes "por privacidad". Si te piden una acción del celular y llegó
+            hasta aquí, responde solo: "Disculpe, no entendí bien la orden. ¿Me la repite de otra forma? Por ejemplo: llama a Juan." 
             Si necesitas un dato para continuar, haz una sola pregunta corta al final.
             Fecha y hora actual: $ahora.
             Datos del celular del usuario (úsalos solo si pregunta por su teléfono): $equipo

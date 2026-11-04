@@ -7,4 +7,4 @@
     android:canPerformGestures="false"
     android:description="@string/desc_accesibilidad"
     android:notificationTimeout="100"
-    android:packageNames="com.whatsapp,com.whatsapp.w4b" />
+    android:packageNames="com.whatsapp,com.whatsapp.w4b,com.google.android.youtube,com.facebook.katana" />

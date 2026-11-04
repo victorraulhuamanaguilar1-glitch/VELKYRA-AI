@@ -16,7 +16,10 @@ import android.view.accessibility.AccessibilityNodeInfo
 /** Lee en voz alta los mensajes que llegan (WhatsApp, Telegram, SMS…). */
 class ServicioNotificaciones : NotificationListenerService() {
 
-    data class Notif(val clave: String, val app: String, val titulo: String, val texto: String, val hora: Long)
+    data class Notif(
+        val clave: String, val app: String, val titulo: String, val texto: String, val hora: Long,
+        val paquete: String = "", val respuesta: Notification.Action? = null
+    )
 
     companion object {
         @Volatile
@@ -27,6 +30,37 @@ class ServicioNotificaciones : NotificationListenerService() {
         val activo get() = conectado != null
 
         fun recientes(): List<Notif> = synchronized(lista) { lista.toList() }
+
+        /** Mensajes que se pueden responder directamente (sin abrir la app). */
+        private val respondibles = ArrayDeque<Notif>()
+
+        fun ultimoRemitente(): String? = synchronized(respondibles) { respondibles.lastOrNull()?.titulo }
+
+        /**
+         * Responde el último mensaje de [quien] (o el último que llegó, si es null) usando la acción
+         * «Responder» de la notificación. Devuelve el nombre del contacto, o null si no encontró ninguno.
+         */
+        fun responder(ctx: Context, quien: String?, texto: String): String? {
+            val n = synchronized(respondibles) {
+                if (quien.isNullOrBlank()) respondibles.lastOrNull()
+                else {
+                    val q = Frase.normalizar(quien)
+                    respondibles.lastOrNull { Frase.normalizar(it.titulo).let { t -> t.contains(q) || q.contains(t) } }
+                }
+            } ?: return null
+            val accion = n.respuesta ?: return null
+            val entradas = accion.remoteInputs ?: return null
+            val datos = android.os.Bundle()
+            for (ri in entradas) datos.putCharSequence(ri.resultKey, texto)
+            val intent = android.content.Intent()
+            android.app.RemoteInput.addResultsToIntent(entradas, intent, datos)
+            return try {
+                accion.actionIntent.send(ctx, 0, intent)
+                n.titulo
+            } catch (_: Exception) {
+                null
+            }
+        }
         fun marcarLeidas() = synchronized(lista) { lista.clear() }
 
         fun permisoConcedido(ctx: Context): Boolean {
@@ -71,9 +105,18 @@ class ServicioNotificaciones : NotificationListenerService() {
         if (!esMensaje && !Prefs.leerTodasLasApps) return
 
         val tituloLimpio = titulo.replace(Regex("\\s*\\(\\d+ mensajes?\\)"), "")
+        // Acción «Responder» (la que permite contestar desde la notificación)
+        val responder = (n.actions?.toList().orEmpty() + Notification.WearableExtender(n).actions)
+            .firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
+        val item = Notif(sbn.key, app, tituloLimpio, texto, ahora, sbn.packageName, responder)
         synchronized(lista) {
-            lista.addLast(Notif(sbn.key, app, tituloLimpio, texto, ahora))
+            lista.addLast(item)
             while (lista.size > 30) lista.removeFirst()
+        }
+        if (responder != null) synchronized(respondibles) {
+            respondibles.removeAll { it.titulo == tituloLimpio && it.paquete == sbn.packageName }
+            respondibles.addLast(item)
+            while (respondibles.size > 30) respondibles.removeFirst()
         }
 
         if (!Prefs.leerMensajes || !puedeHablar()) return
@@ -114,10 +157,16 @@ class ServicioAccesibilidad : AccessibilityService() {
         private var instancia: ServicioAccesibilidad? = null
         @Volatile
         private var enviarHasta = 0L
+        @Volatile
+        private var llamarHasta = 0L
+        @Volatile
+        private var reproducirHasta = 0L
 
         val activo get() = instancia != null
 
         fun prepararEnvio() { enviarHasta = System.currentTimeMillis() + 20_000 }
+        fun prepararLlamadaWhatsapp() { llamarHasta = System.currentTimeMillis() + 20_000 }
+        fun prepararReproduccion() { reproducirHasta = System.currentTimeMillis() + 12_000 }
 
         fun accion(a: Int): Boolean = instancia?.performGlobalAction(a) ?: false
 
@@ -131,24 +180,34 @@ class ServicioAccesibilidad : AccessibilityService() {
     override fun onServiceConnected() { instancia = this }
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
-        if (System.currentTimeMillis() > enviarHasta) return
+        val ahora = System.currentTimeMillis()
+        if (ahora > enviarHasta && ahora > llamarHasta && ahora > reproducirHasta) return
         val pkg = e?.packageName?.toString() ?: return
-        if (!pkg.startsWith("com.whatsapp")) return
         val raiz = rootInActiveWindow ?: return
-        val boton = raiz.findAccessibilityNodeInfosByViewId("$pkg:id/send").firstOrNull { it.isEnabled }
-            ?: buscarPorDescripcion(raiz, listOf("enviar", "send"))
-        if (boton != null && boton.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            enviarHasta = 0
+        if (pkg.startsWith("com.whatsapp")) {
+            if (ahora < enviarHasta) {
+                val boton = raiz.findAccessibilityNodeInfosByViewId("$pkg:id/send").firstOrNull { it.isEnabled }
+                    ?: buscarPorDescripcion(raiz, listOf("enviar", "send"))
+                if (boton != null && boton.performAction(AccessibilityNodeInfo.ACTION_CLICK)) enviarHasta = 0
+            }
+            if (ahora < llamarHasta) {
+                val boton = buscarPorDescripcion(raiz, listOf("llamada", "llamar", "llamada de voz", "voice call", "call"), parcial = true)
+                if (boton != null && boton.performAction(AccessibilityNodeInfo.ACTION_CLICK)) llamarHasta = 0
+            }
+        }
+        if (ahora < reproducirHasta && (pkg.contains("youtube") || pkg.contains("facebook"))) {
+            val boton = buscarPorDescripcion(raiz, listOf("reproducir", "play video", "play"), parcial = false)
+            if (boton != null && boton.performAction(AccessibilityNodeInfo.ACTION_CLICK)) reproducirHasta = 0
         }
     }
 
-    private fun buscarPorDescripcion(n: AccessibilityNodeInfo, textos: List<String>, profundidad: Int = 0): AccessibilityNodeInfo? {
-        if (profundidad > 25) return null
+    private fun buscarPorDescripcion(n: AccessibilityNodeInfo, textos: List<String>, profundidad: Int = 0, parcial: Boolean = false): AccessibilityNodeInfo? {
+        if (profundidad > 30) return null
         val d = n.contentDescription?.toString()?.lowercase().orEmpty()
-        if (n.isClickable && textos.any { d == it }) return n
+        if (n.isClickable && n.isEnabled && textos.any { if (parcial) d.startsWith(it) else d == it }) return n
         for (i in 0 until n.childCount) {
             val h = n.getChild(i) ?: continue
-            buscarPorDescripcion(h, textos, profundidad + 1)?.let { return it }
+            buscarPorDescripcion(h, textos, profundidad + 1, parcial)?.let { return it }
         }
         return null
     }
