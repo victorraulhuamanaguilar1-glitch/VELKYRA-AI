@@ -23,7 +23,9 @@ object Yarvis {
         val seguir: Boolean = false,
         val despues: (() -> Unit)? = null,
         /** Termina la conversación aunque esté activo el modo continuo (despedidas, apps abiertas…). */
-        val cerrar: Boolean = false
+        val cerrar: Boolean = false,
+        /** Texto extra que solo se muestra en pantalla (por ejemplo, el detalle técnico de un error). */
+        val detalle: String? = null
     )
 
     interface Observador {
@@ -155,7 +157,7 @@ object Yarvis {
     }
 
     private fun responder(r: Respuesta, miSesion: Int) {
-        agregar(Mensaje(false, r.texto))
+        agregar(Mensaje(false, r.texto + (r.detalle?.let { "\n[$it]" } ?: "")))
         cambiar(Estado.HABLANDO)
         for (o in observadores) o.alParcial(r.texto)
         val abrioApp = cerebro.tomarAbrioApp()

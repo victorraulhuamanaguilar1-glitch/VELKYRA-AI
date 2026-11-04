@@ -41,7 +41,7 @@ class Cerebro(private val ctx: Context) {
     private val tr get() = Prefs.trato
 
     private val ASYNC = Yarvis.Respuesta("\u0000")
-    private fun R(t: String, seguir: Boolean = false, cerrar: Boolean = false, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues, cerrar)
+    private fun R(t: String, seguir: Boolean = false, cerrar: Boolean = false, detalle: String? = null, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues, cerrar, detalle)
 
     // ¿La última orden abrió otra app? (entonces no se sigue escuchando)
     @Volatile
@@ -83,17 +83,20 @@ class Cerebro(private val ctx: Context) {
     }
 
     private fun preguntarIA(texto: String, cb: (Yarvis.Respuesta) -> Unit, extra: String? = null) {
-        if (!CerebroIA.disponible()) {
-            buscarWeb(texto)
-            cb(R("Mi inteligencia artificial aún no está activada, $tr, así que le muestro lo que encontré en internet. Puede activarla en ajustes."))
-            return
-        }
         fondo(cb) {
+            if (!CerebroIA.disponible()) {
+                Wikipedia.consultar(texto)?.let { return@fondo R("Según Wikipedia: $it") }
+                principal.post { buscarWeb(texto) }
+                return@fondo R("No encontré una respuesta directa, $tr, así que le muestro lo que hay en internet.")
+            }
             try {
                 val r = CerebroIA.preguntar(texto, extra)
                 R(r, seguir = r.trim().endsWith("?"))
             } catch (e: Exception) {
-                R(CerebroIA.mensajeError(e))
+                // Respaldo sin límites: Wikipedia
+                val wiki = if (CerebroIA.hayInternet()) Wikipedia.consultar(texto) else null
+                if (wiki != null) R("Según Wikipedia: $wiki", detalle = "IA no disponible: " + CerebroIA.detalle(e))
+                else R(CerebroIA.mensajeError(e), cerrar = true, detalle = CerebroIA.detalle(e))
             }
         }
     }
@@ -441,6 +444,12 @@ class Cerebro(private val ctx: Context) {
         }
         Regex("raiz cuadrada de (\\d+(?:[.,]\\d+)?)").find(t)?.let { m ->
             return R("Es ${numero(Math.sqrt(m.groupValues[1].replace(',', '.').toDouble()))}, $tr.")
+        }
+
+        // --- Wikipedia (sin límite diario) -----------------------------------------
+        Regex("(?:que dice wikipedia (?:de|sobre)|busca en wikipedia|en wikipedia|wikipedia)\\s+(.+)$").find(t)?.let { m ->
+            val q = f.originalDeGrupo(m, 1)
+            return fondo(cb) { Wikipedia.consultar(q)?.let { R("Según Wikipedia: $it") } ?: R("No encontré «$q» en Wikipedia, $tr.") }
         }
 
         // --- Búsquedas ----------------------------------------------------------

@@ -47,7 +47,10 @@ object CerebroIA {
         candidatos.addAll(modelosDisponibles())
         var ultimo: Exception? = null
         val ahora = System.currentTimeMillis()
+        if (!hayInternet()) throw IOException("sin red")
+        var fallasRed = 0
         for (modelo in candidatos) {
+            if (fallasRed >= 3) break
             if ((agotados[modelo] ?: 0L) > ahora) continue
             var conBusqueda = buscar && !sinBusqueda && busquedaAgotadaHasta < ahora
             var intentos = 0
@@ -61,6 +64,12 @@ object CerebroIA {
                         while (historial.size > 16) historial.removeAt(0)
                     }
                     return r
+                } catch (e: java.io.IOException) {
+                    // Falla momentánea (lentitud, corte): reintentar una vez y luego probar otro modelo
+                    ultimo = e
+                    fallasRed++
+                    if (intentos < 2 && fallasRed < 3) continue
+                    break
                 } catch (e: ErrorIA) {
                     ultimo = e
                     if (conBusqueda && (e.codigo == 429 || (e.codigo == 400 && e.cuerpo.contains("search", true)))) {
@@ -135,15 +144,15 @@ object CerebroIA {
         val cuerpo = JSONObject()
             .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sistema))))
             .put("contents", contenidos)
-            .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 600))
+            .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 2048))
         if (conBusqueda) cuerpo.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
 
         val con = URL("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent")
             .openConnection() as HttpURLConnection
         try {
             con.requestMethod = "POST"
-            con.connectTimeout = 15000
-            con.readTimeout = 45000
+            con.connectTimeout = 20000
+            con.readTimeout = 60000
             con.doOutput = true
             con.setRequestProperty("Content-Type", "application/json; charset=utf-8")
             con.setRequestProperty("x-goog-api-key", Prefs.claveIA)
@@ -179,8 +188,24 @@ object CerebroIA {
             e is ErrorIA && e.codigo == 404 -> "El modelo de inteligencia artificial configurado ya no existe, $tr. Revíselo en ajustes."
             e is ErrorIA && e.codigo == 429 -> "He alcanzado el límite gratuito de consultas por el momento, $tr. Inténtelo en un minuto."
             e is ErrorIA && e.codigo >= 500 -> "Los servidores de inteligencia artificial están ocupados, $tr. Inténtelo de nuevo."
-            e is IOException -> "No tengo conexión a internet en este momento, $tr."
+            e is java.net.SocketTimeoutException -> "El servidor de inteligencia artificial tardó demasiado en responder, $tr. Inténtelo de nuevo."
+            e is IOException && !hayInternet() -> "No tengo conexión a internet en este momento, $tr."
+            e is IOException -> "Tuve un problema para comunicarme con el servidor de inteligencia artificial, $tr. Inténtelo de nuevo."
             else -> "Algo falló al procesar la respuesta, $tr."
         }
+    }
+
+    /** Detalle técnico del error (se muestra en pantalla, no se dice en voz alta). */
+    fun detalle(e: Exception): String = when (e) {
+        is ErrorIA -> "Error ${e.codigo}: " + Regex("\"message\"\\s*:\\s*\"([^\"]{0,160})").find(e.cuerpo)?.groupValues?.get(1).orEmpty()
+        else -> e.javaClass.simpleName + (e.message?.let { ": " + it.take(120) } ?: "")
+    }
+
+    fun hayInternet(): Boolean = try {
+        val cm = Yarvis.ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (_: Exception) {
+        true
     }
 }
