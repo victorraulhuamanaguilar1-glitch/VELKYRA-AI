@@ -42,6 +42,15 @@ class ServicioEscucha : Service(), RecognitionListener {
         val activo get() = instancia != null
         val escuchandoPalabra get() = instancia?.speech != null
 
+        /**
+         * Gramática del reconocedor sin internet: solo busca «jarvis» (así entiende «Yarvis»).
+         * Las demás son palabras parecidas que sirven de «señuelo» para que no se active por error.
+         */
+        private val GRAMATICA = org.json.JSONArray(
+            listOf("jarvis", "javier", "jardines", "jardín", "garbanzo", "travis", "marvin", "darwin",
+                "jarabe", "jarra", "jamás", "harás", "jabón", "harvard", "[unk]")
+        ).toString()
+
         /** Variantes de cómo el reconocedor puede escribir «Yarvis». */
         private val palabraJunta = Regex("(y|ll|j|h|g|i|sh)ar(v|b)i(s|z|ss|ces)")
         private val palabrasSueltas = setOf(
@@ -182,7 +191,8 @@ class ServicioEscucha : Service(), RecognitionListener {
         if (speech != null) return
         val m = modelo ?: return
         try {
-            val rec = Recognizer(m, 16000f)
+            val rec = Recognizer(m, 16000f, GRAMATICA)
+            try { rec.setWords(true) } catch (_: Throwable) {}
             val s = SpeechService(rec, 16000f)
             s.startListening(this)
             reconocedor = rec
@@ -204,15 +214,25 @@ class ServicioEscucha : Service(), RecognitionListener {
 
     private fun revisarTexto(json: String?) {
         if (json.isNullOrBlank()) return
+        var confianzaOk = true
         val texto = try {
             val o = JSONObject(json)
+            val palabras = o.optJSONArray("result")
+            if (palabras != null) {
+                // Resultado final: se exige una confianza mínima para «jarvis»
+                confianzaOk = false
+                for (i in 0 until palabras.length()) {
+                    val w = palabras.getJSONObject(i)
+                    if (w.optString("word") == "jarvis" && w.optDouble("conf", 1.0) >= 0.35) confianzaOk = true
+                }
+            }
             o.optString("partial").ifBlank { o.optString("text") }
         } catch (_: Exception) { "" }
-        if (texto.isBlank()) return
-        alOir?.invoke(texto)
+        if (texto.isBlank() || texto == "[unk]") return
+        alOir?.invoke(texto.replace("jarvis", "yarvis").replace("[unk]", "…"))
         val ahora = SystemClock.elapsedRealtime()
         if (ahora - ultimaActivacion < 2500 || ahora - reanudadoEn < 700) return
-        if (contienePalabra(texto)) {
+        if (confianzaOk && contienePalabra(texto)) {
             ultimaActivacion = ahora
             detenerEscucha()
             Yarvis.activar(true)
