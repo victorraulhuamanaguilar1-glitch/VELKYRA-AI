@@ -2,6 +2,7 @@ name: Generar APK
 
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -17,20 +18,60 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
-      - name: Compilar APK
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk VELKYRA-AI.apk
-      - uses: actions/upload-artifact@v4
+
+      - name: Modelo de voz en español (sin internet)
+        id: cache-modelo
+        uses: actions/cache@v4
         with:
-          name: VELKYRA-AI-apk
-          path: VELKYRA-AI.apk
+          path: modelo-es
+          key: vosk-model-small-es-0.42
+
+      - name: Descargar modelo de voz
+        if: steps.cache-modelo.outputs.cache-hit != 'true'
+        run: |
+          curl -sSL -o modelo.zip https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip
+          unzip -q modelo.zip
+          mv vosk-model-small-es-0.42 modelo-es
+
+      - name: Copiar modelo a la app
+        run: |
+          mkdir -p app/src/main/assets
+          rm -rf app/src/main/assets/modelo-es
+          cp -r modelo-es app/src/main/assets/modelo-es
+          echo "0.42" > app/src/main/assets/modelo-es/VERSION
+
+      - name: Compilar APK
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --console=plain 2>&1 | tee build.log
+          cp app/build/outputs/apk/release/app-release.apk YARVIS.apk
+
       - name: Publicar en Releases
+        if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: VELKYRA AI v1.0.${{ github.run_number }}
-          body: Descarga **VELKYRA-AI.apk** e instálalo en tu celular Android (8.0 o superior).
-          files: VELKYRA-AI.apk
+          tag_name: v2.0.${{ github.run_number }}
+          name: YARVIS v2.0.${{ github.run_number }}
+          body: |
+            Descarga **YARVIS.apk** e instálalo en tu celular (Android 12 o superior).
+            Desarrollado por VELKYRA · Soporte: velkyra3@gmail.com
+          files: YARVIS.apk
           make_latest: true
+
+      - name: Guardar registro de compilación
+        if: always()
+        run: |
+          mkdir -p /tmp/reg && cp build.log /tmp/reg/ 2>/dev/null || true
+          ls -R modelo-es > /tmp/reg/modelo.txt 2>/dev/null || true
+          find modelo-es -name "words.txt" -exec grep -iE "^(yar|jar|llar|har|gar|yab|jab)[a-z]*" {} \; >> /tmp/reg/modelo.txt 2>/dev/null || true
+          git config user.name "ci"; git config user.email "ci@velkyra"
+          git checkout --orphan registros
+          git rm -rfq . > /dev/null
+          cp /tmp/reg/* . 2>/dev/null || true
+          echo "${{ job.status }}" > estado.txt
+          git add -f build.log modelo.txt estado.txt 2>/dev/null || true
+          git commit -qm "Registro run ${{ github.run_number }}" || true
+          git push -f origin registros || true

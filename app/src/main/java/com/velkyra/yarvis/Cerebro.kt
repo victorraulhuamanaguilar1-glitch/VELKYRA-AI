@@ -1,0 +1,793 @@
+package com.velkyra.yarvis
+
+import android.Manifest
+import android.accessibilityservice.AccessibilityService
+import android.app.NotificationManager
+import android.app.SearchManager
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ResolveInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.net.Uri
+import android.os.BatteryManager
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.AlarmClock
+import android.provider.MediaStore
+import android.provider.Settings
+import android.telephony.SmsManager
+import android.view.KeyEvent
+import java.net.HttpURLConnection
+import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.floor
+
+/**
+ * El cerebro de YARVIS: entiende la orden y la ejecuta.
+ * Primero intenta con las funciones del celular; si no es una orden, responde la IA.
+ */
+class Cerebro(private val ctx: Context) {
+
+    private val es = Locale.forLanguageTag("es-PE")
+    private val principal = Handler(Looper.getMainLooper())
+    private val tr get() = Prefs.trato
+
+    private val ASYNC = Yarvis.Respuesta("\u0000")
+    private fun R(t: String, seguir: Boolean = false, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues)
+
+    fun olvidarConversacion() = CerebroIA.olvidar()
+
+    fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
+        val f = Frase(texto)
+        val r = try {
+            local(f, cb)
+        } catch (e: Exception) {
+            R("Tuve un inconveniente al ejecutar esa orden, $tr.")
+        }
+        when {
+            r === ASYNC -> {}
+            r != null -> cb(r)
+            else -> preguntarIA(texto, cb)
+        }
+    }
+
+    private fun fondo(cb: (Yarvis.Respuesta) -> Unit, tarea: () -> Yarvis.Respuesta): Yarvis.Respuesta {
+        Thread {
+            val r = try { tarea() } catch (e: Exception) { R("No pude completar eso, $tr.") }
+            cb(r)
+        }.start()
+        return ASYNC
+    }
+
+    private fun preguntarIA(texto: String, cb: (Yarvis.Respuesta) -> Unit, extra: String? = null) {
+        if (!CerebroIA.disponible()) {
+            buscarWeb(texto)
+            cb(R("Mi inteligencia artificial aún no está activada, $tr, así que le muestro lo que encontré en internet. Puede activarla en ajustes."))
+            return
+        }
+        fondo(cb) {
+            try {
+                val r = CerebroIA.preguntar(texto, extra)
+                R(r, seguir = r.trim().endsWith("?"))
+            } catch (e: Exception) {
+                R(CerebroIA.mensajeError(e))
+            }
+        }
+    }
+
+    // =====================================================================
+    //  Órdenes
+    // =====================================================================
+
+    private fun local(f: Frase, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta? {
+        val t = f.t
+        if (t.isBlank()) return R("No le escuché bien, $tr.")
+
+        // --- Control de YARVIS ---------------------------------------------
+        if (f.tiene("(deja de escuchar|desactiva la escucha|no me escuches|desactiva la palabra|apaga la escucha)")) {
+            Prefs.escuchaActiva = false
+            ServicioEscucha.actualizar(ctx)
+            return R("Entendido, $tr. Dejaré de escuchar la palabra de activación hasta que me lo indique.")
+        }
+        if (f.tiene("(activa la escucha|vuelve a escuchar|escucha siempre|activa la palabra)")) {
+            Prefs.escuchaActiva = true
+            ServicioEscucha.actualizar(ctx)
+            return R("Escucha activada, $tr. Diga «Yarvis» cuando me necesite.")
+        }
+        if (f.tiene("^(cancela|cancelar|olvidalo|olvida eso|nada|no nada|ninguna|dejalo|no importa)$")) {
+            return R("Como desee, $tr.")
+        }
+        if (f.tiene("^(adios|hasta luego|hasta manana|chau|chao|nos vemos|eso es todo|nada mas|es todo|descansa|apagate|buenas noches yarvis)\\b")) {
+            return R(listOf("A su servicio, $tr.", "Estaré aquí cuando me necesite, $tr.", "Que tenga un excelente día, $tr.").random())
+        }
+        if (f.tiene("(que puedes hacer|que sabes hacer|^ayuda$|que comandos|lista de comandos|como te uso|para que sirves)")) {
+            lanzar(Intent(ctx, ComandosActivity::class.java))
+            return R("Puedo hacer llamadas, enviar mensajes por WhatsApp y SMS, leer sus notificaciones, programar alarmas, recordatorios y eventos, " +
+                "decirle el clima, controlar la música, la linterna y el volumen, abrir aplicaciones, poner videos, tomar fotos " +
+                "y responder cualquier pregunta. Le abrí la lista completa de órdenes, $tr.")
+        }
+
+        // --- Conversación ----------------------------------------------------
+        if (f.tiene("^(hola|hey|oye|buenas|buenos dias|buenas tardes|buenas noches|que tal|saludos)( yarvis)?$")) {
+            return R("${saludo()}, $tr. ¿En qué puedo ayudarle?", seguir = true)
+        }
+        if (f.tiene("(quien eres|como te llamas|cual es tu nombre|presentate|que eres)")) {
+            return R("Soy YARVIS, su asistente personal, desarrollado por VELKYRA. Estoy a su servicio las veinticuatro horas, $tr.")
+        }
+        if (f.tiene("(quien te (creo|hizo|desarrollo|programo)|quien es tu creador)")) {
+            return R("Fui desarrollado por VELKYRA, $tr. Para soporte puede escribir a velkyra3 arroba gmail punto com.")
+        }
+        if (f.tiene("(como estas|como te encuentras|como te va|todo bien)")) {
+            return R("Todos mis sistemas funcionan al cien por ciento, $tr. Gracias por preguntar.")
+        }
+        if (f.tiene("^(gracias|muchas gracias|excelente|buen trabajo|perfecto|genial|te pasaste)")) {
+            return R(listOf("Para eso estoy, $tr.", "Siempre a su servicio, $tr.", "Es un placer, $tr.").random())
+        }
+        if (f.tiene("(como me llamo|quien soy|sabes mi nombre)")) {
+            return if (Prefs.nombre.isNotBlank()) R("Usted es ${Prefs.nombre}, $tr. Lo tengo muy presente.") else R("Aún no me ha dicho su nombre, $tr. Puede configurarlo en ajustes.")
+        }
+        Regex("^(?:a partir de ahora |desde ahora )?(?:llamame|dime|quiero que me llames|me llamo)\\s+(.+)$").find(t)?.let { m ->
+            val nuevo = f.originalDeGrupo(m, 1).trim()
+            if (t.startsWith("me llamo")) { Prefs.nombre = nuevo; if (Prefs.tratoGuardado.isBlank()) Prefs.tratoGuardado = nuevo }
+            else Prefs.tratoGuardado = nuevo
+            return R("Entendido. A partir de ahora le diré $nuevo.")
+        }
+        if (f.tiene("(chiste|hazme reir|algo gracioso|dime algo divertido)")) return R(chistes.random())
+        if (f.tiene("(lanza|tira) una moneda|cara o sello|cara o cruz")) return R("Ha salido ${listOf("cara", "sello").random()}, $tr.")
+        if (f.tiene("(lanza|tira) (un )?dado")) return R("Ha salido un ${(1..6).random()}, $tr.")
+        Regex("numero (?:al azar|aleatorio)(?: (?:del|entre(?: el)?) (\\d+) (?:al|y(?: el)?) (\\d+))?").find(t)?.let { m ->
+            val a = m.groupValues[1].toIntOrNull() ?: 1
+            val b = m.groupValues[2].toIntOrNull() ?: 100
+            return R("El número es ${(minOf(a, b)..maxOf(a, b)).random()}, $tr.")
+        }
+
+        // --- Alarmas y temporizadores ---------------------------------------
+        if (f.tiene("(alarma|despiertame|levantame)") && !f.tiene("(quita|borra|elimina|cancela|apaga|mis alarmas)")) {
+            val m = Tiempo.analizar(t) ?: return R("¿A qué hora pongo la alarma, $tr?", seguir = true)
+            val c = m.cal
+            val i = Intent(AlarmClock.ACTION_SET_ALARM)
+                .putExtra(AlarmClock.EXTRA_HOUR, c.get(Calendar.HOUR_OF_DAY))
+                .putExtra(AlarmClock.EXTRA_MINUTES, c.get(Calendar.MINUTE))
+                .putExtra(AlarmClock.EXTRA_MESSAGE, "YARVIS")
+                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            if (m.conDia && Tiempo.diasEntre(Calendar.getInstance(), c) > 1) {
+                i.putExtra(AlarmClock.EXTRA_DAYS, arrayListOf(c.get(Calendar.DAY_OF_WEEK)))
+            }
+            return if (lanzar(i)) R("Alarma programada para ${Tiempo.describir(c)}, $tr.") else R("No encontré una aplicación de reloj, $tr.")
+        }
+        if (f.tiene("(mis alarmas|que alarmas tengo|ver alarmas)")) {
+            lanzar(Intent(AlarmClock.ACTION_SHOW_ALARMS))
+            return R("Aquí tiene sus alarmas, $tr.")
+        }
+        if (f.tiene("(temporizador|cronometro|cuenta regresiva|avisame en|timer)")) {
+            val d = Tiempo.duracion(t) ?: return R("¿De cuánto tiempo, $tr?", seguir = true)
+            val i = Intent(AlarmClock.ACTION_SET_TIMER)
+                .putExtra(AlarmClock.EXTRA_LENGTH, d.first)
+                .putExtra(AlarmClock.EXTRA_MESSAGE, "YARVIS")
+                .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            return if (lanzar(i)) R("Temporizador de ${duracionTexto(d.first)} en marcha, $tr.") else R("No encontré una aplicación de reloj, $tr.")
+        }
+
+        // --- Recordatorios ---------------------------------------------------
+        if (f.tiene("(mis recordatorios|que recordatorios|recordatorios pendientes|que me tienes que recordar)")) {
+            val l = Recordatorios.lista()
+            if (l.isEmpty()) return R("No tiene recordatorios pendientes, $tr.")
+            val txt = l.take(5).joinToString(". ") { "${it.texto}, ${Tiempo.describir(Calendar.getInstance().apply { timeInMillis = it.cuando })}" }
+            return R("Tiene ${l.size} recordatorio${if (l.size == 1) "" else "s"}: $txt.")
+        }
+        if (f.tiene("(borra|elimina|cancela|quita) (todos )?(los |mis )?recordatorios")) {
+            Recordatorios.borrarTodos(ctx)
+            return R("He eliminado todos sus recordatorios, $tr.")
+        }
+        Regex("^(?:recuerdame|recordarme|recuerda(?:me)?|avisame|haz(?:me)? acuerdo|pon(?:me)? un recordatorio(?: para)?)\\b\\s*(.*)$").find(t)?.let { m ->
+            val resto = m.groupValues[1]
+            val momento = Tiempo.analizar(t)
+            if (momento == null || !(momento.conHora || momento.conDia)) {
+                if (Regex("^que\\s").containsMatchIn(resto) || resto.isNotBlank()) {
+                    // Sin hora: se guarda como nota
+                    val nota = f.originalEntre(m.groups[1]!!.range.first).replace(Regex("^(?i)que\\s+"), "")
+                    guardarNota(nota)
+                    return R("Anotado, $tr: $nota. Si desea que se lo recuerde a una hora, dígame cuándo.")
+                }
+                return R("¿Qué desea que le recuerde y cuándo, $tr?", seguir = true)
+            }
+            val rangos = momento.rangos + listOf(m.groups[0]!!.range.first until (m.groups[1]?.range?.first ?: 0))
+            var tarea = f.originalSin(rangos).trim()
+                .replace(Regex("^(?i)(que|de|para)\\s+"), "").trim()
+            if (tarea.isBlank()) tarea = "lo que me pidió"
+            Recordatorios.crear(ctx, momento.cal.timeInMillis, tarea)
+            return R("Hecho, $tr. Le recordaré «$tarea» ${Tiempo.describir(momento.cal)}.")
+        }
+
+        // --- Agenda ------------------------------------------------------------
+        if (f.tiene("(que tengo|mi agenda|mis eventos|mis citas|tengo algo|que hay en mi (agenda|calendario))")) {
+            val dia = if (f.tiene("pasado manana")) 2 else if (f.tiene("manana")) 1 else 0
+            val ev = Agenda.eventos(ctx, dia) ?: return R("Necesito permiso para ver su calendario, $tr.")
+            val cuando = listOf("hoy", "mañana", "pasado mañana")[dia]
+            val rec = Recordatorios.lista().filter {
+                Tiempo.diasEntre(Calendar.getInstance(), Calendar.getInstance().apply { timeInMillis = it.cuando }) == dia
+            }.map { "recordatorio: ${it.texto}" }
+            val todo = ev + rec
+            return if (todo.isEmpty()) R("No tiene nada programado para $cuando, $tr.")
+            else R("Para $cuando tiene: ${todo.joinToString(". ")}.")
+        }
+        Regex("^(?:agenda(?:me)?|agendar|anota en (?:mi|el) calendario|crea(?:me)? un evento|programa(?:me)? una (?:reunion|cita)|pon en mi (?:agenda|calendario))\\s+(.*)$").find(t)?.let { m ->
+            val momento = Tiempo.analizar(t) ?: return R("¿Para qué día y hora lo agendo, $tr?", seguir = true)
+            var titulo = f.originalSin(momento.rangos + listOf(0 until m.groups[1]!!.range.first)).trim()
+                .replace(Regex("^(?i)(un|una|el|la|para|de)\\s+"), "").replaceFirstChar { it.uppercase() }
+            if (titulo.isBlank()) titulo = "Evento"
+            return if (Agenda.crear(ctx, titulo, momento.cal)) R("Agendado, $tr: $titulo, ${Tiempo.describir(momento.cal)}.")
+            else {
+                lanzar(Intent(Intent.ACTION_INSERT, android.provider.CalendarContract.Events.CONTENT_URI)
+                    .putExtra(android.provider.CalendarContract.Events.TITLE, titulo)
+                    .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, momento.cal.timeInMillis))
+                R("Le abrí el calendario para confirmar el evento, $tr.")
+            }
+        }
+
+        // --- Notas -----------------------------------------------------------
+        if (f.tiene("(borra|elimina|limpia) (todas )?(las |mis )?notas")) {
+            Prefs.notas = ""
+            return R("He borrado todas sus notas, $tr.")
+        }
+        if (f.tiene("(mis notas|lee (las|mis) notas|que (te )?(pedi|dije) que (anotaras|recordaras)|que anotaste|que tengo anotado)")) {
+            val n = Prefs.notas.lines().filter { it.isNotBlank() }
+            return if (n.isEmpty()) R("No tiene notas guardadas, $tr.") else R("Tiene ${n.size} nota${if (n.size == 1) "" else "s"}: ${n.joinToString(". ")}.")
+        }
+        Regex("^(?:anota|apunta|toma nota|guarda una nota|escribe una nota|nota)(?: de)?(?: que)?\\s+(.+)$").find(t)?.let { m ->
+            val nota = f.originalDeGrupo(m, 1)
+            guardarNota(nota)
+            return R("Anotado, $tr.")
+        }
+
+        // --- Mensajes: WhatsApp y SMS ----------------------------------------
+        mensaje(f)?.let { return it }
+        if (f.tiene("(lee|leeme|que dicen|tengo) (mis |los )?(mensajes|notificaciones|whatsapps?)|mensajes nuevos|quien me escribio")) {
+            return leerNotificaciones()
+        }
+
+        // --- Llamadas ----------------------------------------------------------
+        Regex("^(?:llama|llamar|llamale|marca|marcale|marcar|telefonea|comunicame con|haz una llamada a)\\s+(?:a\\s+|al\\s+|a la\\s+)?(.+?)(?:\\s+por favor)?$").find(t)?.let { m ->
+            return llamar(f.originalDeGrupo(m, 1))
+        }
+
+        // --- Hora, fecha y cálculos de días ----------------------------------
+        if (f.tiene("(que hora|la hora|hora es|horas son)") || t == "hora") {
+            return R("Son las ${SimpleDateFormat("h:mm a", es).format(Date())}, $tr.")
+        }
+        if (f.tiene("(que dia|que fecha|la fecha|dia es hoy|a cuantos estamos)")) {
+            return R("Hoy es ${SimpleDateFormat("EEEE d 'de' MMMM 'de' yyyy", es).format(Date())}, $tr.")
+        }
+        Regex("cuantos dias faltan para (?:el |la )?(.+)$").find(t)?.let { m ->
+            val obj = m.groupValues[1]
+            val hoy = Calendar.getInstance()
+            val fecha = when {
+                obj.contains("navidad") -> Calendar.getInstance().apply { set(Calendar.MONTH, Calendar.DECEMBER); set(Calendar.DAY_OF_MONTH, 25) }
+                obj.contains("ano nuevo") -> Calendar.getInstance().apply { add(Calendar.YEAR, 1); set(Calendar.MONTH, Calendar.JANUARY); set(Calendar.DAY_OF_MONTH, 1) }
+                obj.contains("fiestas patrias") -> Calendar.getInstance().apply { set(Calendar.MONTH, Calendar.JULY); set(Calendar.DAY_OF_MONTH, 28) }
+                else -> Tiempo.analizar(obj)?.cal
+            } ?: return null
+            if (Tiempo.diasEntre(hoy, fecha) < 0) fecha.add(Calendar.YEAR, 1)
+            val d = Tiempo.diasEntre(hoy, fecha)
+            return R(if (d == 0) "¡Es hoy, $tr!" else "Faltan $d día${if (d == 1) "" else "s"}, $tr.")
+        }
+
+        // --- Clima -----------------------------------------------------------
+        if (f.tiene("(clima|que tiempo hace|temperatura|va a llover|llovera|hace frio|hace calor|pronostico)")) {
+            val ciudad = Regex("(?:en|de|para)\\s+([a-z ]{3,})$").find(t)?.groupValues?.get(1)
+                ?.replace(Regex("\\b(hoy|manana|pasado manana|ahora)\\b"), "")?.trim()
+                ?.takeIf { it.isNotBlank() && it !in listOf("la ciudad", "mi ciudad", "aqui", "mi zona") }
+            val dia = if (f.tiene("pasado manana")) 2 else if (f.tiene("\\bmanana\\b")) 1 else 0
+            return fondo(cb) { R(Clima.informe(ctx, ciudad, dia)) }
+        }
+        if (f.tiene("(donde estoy|mi ubicacion|en que lugar estoy|en que ciudad estoy)")) {
+            return fondo(cb) {
+                val l = Clima.ubicacion(ctx) ?: return@fondo R("No pude obtener su ubicación, $tr. Verifique que el GPS esté activado.")
+                R("Se encuentra en ${Clima.nombreDe(ctx, l.latitude, l.longitude)}, $tr.")
+            }
+        }
+
+        // --- Linterna, batería, volumen, brillo, sonido ----------------------
+        if (f.tiene("(linterna|flash)") || f.tiene("(prende|enciende|apaga) (la )?luz")) {
+            val on = !f.tiene("(apaga|desactiva|quita)")
+            return if (linterna(on)) R(if (on) "Linterna encendida, $tr." else "Linterna apagada, $tr.") else R("Este equipo no tiene flash disponible, $tr.")
+        }
+        if (f.tiene("(bateria|carga del (celular|telefono)|cuanta carga)")) {
+            val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+            val n = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            val c = bm.isCharging
+            var r = "La batería está al $n por ciento" + if (c) " y cargando, $tr." else ", $tr."
+            if (n <= 15 && !c) r += " Le sugiero conectarlo pronto."
+            return R(r)
+        }
+        if (f.tiene("(volumen|silencia|sonido)") && !f.tiene("modo")) return volumen(f)
+        if (f.tiene("modo (silencio|silencioso|vibracion|vibrar|normal|sonido)|pon(lo)? en (silencio|vibracion)")) return modoSonido(f)
+        if (f.tiene("no molestar")) return noMolestar(!f.tiene("(desactiva|quita|apaga)"))
+        if (f.tiene("brillo")) return brillo(f)
+
+        // --- Conectividad ----------------------------------------------------
+        if (f.tiene("\\b(wifi|wi fi|wi-fi)\\b")) { lanzar(Intent(Settings.Panel.ACTION_WIFI)); return R("Aquí tiene el panel de wifi, $tr.") }
+        if (f.tiene("(datos moviles|internet movil|los datos)")) { lanzar(Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)); return R("Aquí tiene la conexión a internet, $tr.") }
+        if (f.tiene("bluetooth")) { lanzar(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return R("Aquí tiene el bluetooth, $tr.") }
+        if (f.tiene("(gps|ubicacion)") && f.tiene("(activa|desactiva|prende|apaga|enciende)")) { lanzar(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); return R("Aquí tiene la ubicación, $tr.") }
+        if (f.tiene("modo avion")) { lanzar(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)); return R("Aquí puede cambiar el modo avión, $tr.") }
+
+        // --- Pantalla (accesibilidad) ------------------------------------------
+        if (f.tiene("(bloquea|apaga) (el celular|la pantalla|el telefono)|bloquear (el celular|pantalla)")) {
+            return global(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN, "Bloqueando, $tr.")
+        }
+        if (f.tiene("(captura de pantalla|pantallazo|screenshot|toma (una )?captura)")) {
+            VentanaFlotante.ocultar()
+            return R("Capturando la pantalla, $tr.") {
+                VentanaFlotante.ocultar()
+                principal.postDelayed({ ServicioAccesibilidad.accion(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT) }, 700)
+            }
+        }
+        if (f.tiene("^(ve al inicio|pantalla de inicio|ir al inicio|inicio|al inicio|home)$")) return global(AccessibilityService.GLOBAL_ACTION_HOME, "Listo, $tr.")
+        if (f.tiene("^(atras|regresa|vuelve atras|retrocede)$")) return global(AccessibilityService.GLOBAL_ACTION_BACK, "Listo, $tr.")
+        if (f.tiene("(apps recientes|aplicaciones recientes|multitarea)")) return global(AccessibilityService.GLOBAL_ACTION_RECENTS, "Aquí están, $tr.")
+        if (f.tiene("(abre|muestra|baja) (las )?notificaciones")) return global(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS, "Aquí están sus notificaciones, $tr.")
+        if (f.tiene("(ajustes|configuracion) rapid")) return global(AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS, "Listo, $tr.")
+        if (f.tiene("pantalla dividida")) return global(AccessibilityService.GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN, "Pantalla dividida, $tr.")
+
+        // --- Música ------------------------------------------------------------
+        if (f.tiene("^(pausa|pausar|deten|detener|para)( la)?( musica| cancion| video| reproduccion)?$") || f.tiene("(pausa|deten|para) la (musica|cancion)")) {
+            return tecla(KeyEvent.KEYCODE_MEDIA_PAUSE, "En pausa, $tr.")
+        }
+        if (f.tiene("^(continua|reanuda|sigue|play|dale play)( la)?( musica| cancion| reproduccion)?$")) return tecla(KeyEvent.KEYCODE_MEDIA_PLAY, "Reanudando, $tr.")
+        if (f.tiene("(siguiente|pasa la|salta la|otra) cancion|^siguiente$|cambia de cancion")) return tecla(KeyEvent.KEYCODE_MEDIA_NEXT, "Siguiente canción, $tr.")
+        if (f.tiene("cancion anterior|^anterior$|regresa la cancion")) return tecla(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Canción anterior, $tr.")
+        if (f.tiene("^(pon|reproduce|toca) (algo de )?musica$")) return tecla(KeyEvent.KEYCODE_MEDIA_PLAY, "Reproduciendo música, $tr.")
+
+        // --- Cámara --------------------------------------------------------------
+        if (f.tiene("(selfie|selfi|camara frontal|autofoto)")) {
+            val i = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                .putExtra("android.intent.extras.CAMERA_FACING", 1)
+                .putExtra("android.intent.extras.LENS_FACING_FRONT", 1)
+                .putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
+            return if (lanzar(i)) R("Cámara frontal lista. Sonría, $tr.") else R("No encontré la cámara, $tr.")
+        }
+        if (f.tiene("(toma|tomame|saca|sacame) (una )?foto|abre la camara|^camara$")) {
+            return if (lanzar(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))) R("Cámara lista, $tr.") else R("No encontré la cámara, $tr.")
+        }
+        if (f.tiene("graba (un )?video|grabar video")) {
+            return if (lanzar(Intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA))) R("Cámara de video lista, $tr.") else R("No encontré la cámara, $tr.")
+        }
+        if (f.tiene("(mis fotos|la galeria|abre galeria)")) {
+            lanzar(Intent(Intent.ACTION_VIEW).setType("image/*"))
+            return R("Aquí tiene sus fotos, $tr.")
+        }
+
+        // --- Mapas -------------------------------------------------------------
+        Regex("(?:como llego a|como llegar a|llevame a|navega a|navegar a|ruta (?:a|hacia|para)|direcciones (?:a|para)|vamos a)\\s+(.+)$").find(t)?.let { m ->
+            val lugar = f.originalDeGrupo(m, 1)
+            if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(lugar)))))
+                abrirUrl("https://www.google.com/maps/dir/?api=1&destination=" + Uri.encode(lugar))
+            return R("Trazando la ruta hacia $lugar, $tr.")
+        }
+        Regex("(?:donde queda|donde esta|ubica|muestrame en el mapa)\\s+(.+)$").find(t)?.let { m ->
+            val lugar = f.originalDeGrupo(m, 1)
+            if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(lugar)))))
+                abrirUrl("https://www.google.com/maps/search/" + Uri.encode(lugar))
+            return R("Le muestro $lugar en el mapa, $tr.")
+        }
+        Regex("(.+?)\\s+(?:cerca|cercanos|cercanas|cerca de aqui|cerca de mi)$").find(t)?.let { m ->
+            val q = f.originalDeGrupo(m, 1).replace(Regex("^(?i)(busca|buscame|hay|donde hay|muestrame)\\s+"), "")
+            lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(q))))
+            return R("Buscando $q cerca de usted, $tr.")
+        }
+
+        // --- Videos, música y sitios -------------------------------------------
+        sitios(f, cb)?.let { return it }
+
+        // --- Abrir aplicaciones y páginas --------------------------------------
+        Regex("^(?:abre|abrir|abreme|inicia|ejecuta|lanza|entra a|entra en|ingresa a|ve a)\\s+(?:la app(?:licacion)?\\s+(?:de\\s+)?|el\\s+|la\\s+|los\\s+|las\\s+|mi\\s+)?(?:pagina\\s+(?:de\\s+|web\\s+)?|sitio\\s+(?:web\\s+)?|web\\s+)?(.+)$").find(t)?.let { m ->
+            val nombre = m.groupValues[1].trim()
+            if (t.contains("pagina") || t.contains("sitio") || t.contains("web") || Regex("(punto|\\.)(com|pe|org|net|edu|gob)").containsMatchIn(nombre)) {
+                return abrirPagina(nombre)
+            }
+            return abrirApp(nombre)
+        }
+
+        // --- Calculadora ---------------------------------------------------------
+        val calc = Regex("(-?\\d+(?:[.,]\\d+)?)\\s*(\\+|mas|menos|-|x|\\*|×|por|/|dividido entre|dividido por|dividido|entre|elevado a(?:l)?)\\s*(-?\\d+(?:[.,]\\d+)?)").find(t)
+        if (calc != null && !f.tiene("^(llama|marca|manda|envia)")) {
+            val a = calc.groupValues[1].replace(',', '.').toDouble()
+            val b = calc.groupValues[3].replace(',', '.').toDouble()
+            val r = when (calc.groupValues[2]) {
+                "+", "mas" -> a + b
+                "-", "menos" -> a - b
+                "x", "*", "×", "por" -> a * b
+                "elevado a", "elevado al" -> Math.pow(a, b)
+                else -> { if (b == 0.0) return R("No se puede dividir entre cero, $tr."); a / b }
+            }
+            return R("El resultado es ${numero(r)}, $tr.")
+        }
+        Regex("(?:el )?(\\d+(?:[.,]\\d+)?)\\s*(?:%|por ciento) de (\\d+(?:[.,]\\d+)?)").find(t)?.let { m ->
+            val r = m.groupValues[1].replace(',', '.').toDouble() * m.groupValues[2].replace(',', '.').toDouble() / 100
+            return R("Es ${numero(r)}, $tr.")
+        }
+        Regex("raiz cuadrada de (\\d+(?:[.,]\\d+)?)").find(t)?.let { m ->
+            return R("Es ${numero(Math.sqrt(m.groupValues[1].replace(',', '.').toDouble()))}, $tr.")
+        }
+
+        // --- Búsquedas ----------------------------------------------------------
+        Regex("^(?:busca|buscame|buscar|googlea)\\s+en\\s+(?:google|internet|la web)\\s+(.+)$").find(t)?.let { m ->
+            val q = f.originalDeGrupo(m, 1)
+            buscarWeb(q)
+            return R("Buscando $q en Google, $tr.")
+        }
+        Regex("^(?:busca|buscame|buscar|googlea|investiga)\\s+(?:sobre\\s+|informacion (?:de|sobre)\\s+)?(.+)$").find(t)?.let { m ->
+            val q = f.originalDeGrupo(m, 1)
+            if (!CerebroIA.disponible()) { buscarWeb(q); return R("Buscando $q en internet, $tr.") }
+            preguntarIA("Busca en internet y resume brevemente: $q", cb)
+            return ASYNC
+        }
+        Regex("^(?:traduce|traducir|como se dice)\\s+(.+)$").find(t)?.let {
+            if (!CerebroIA.disponible()) {
+                abrirUrl("https://translate.google.com/?sl=auto&tl=en&text=" + Uri.encode(f.original))
+                return R("Le abrí el traductor, $tr.")
+            }
+            preguntarIA(f.original, cb, "Si te piden traducir, responde la traducción y cómo se pronuncia de forma sencilla.")
+            return ASYNC
+        }
+
+        return null
+    }
+
+    // =====================================================================
+    //  Acciones
+    // =====================================================================
+
+    private fun mensaje(f: Frase): Yarvis.Respuesta? {
+        val t = f.t
+        val canal = "(?:por\\s+)?(?:whatsapp|wasap|wasa|guasap|wsp|sms|mensaje de texto|texto)"
+        val r1 = Regex("^(?:manda(?:le)?|envia(?:le)?|escribe(?:le)?|dile|dale|avisale|mandar|enviar)\\s+(?:un\\s+|una\\s+)?(?:mensaje\\s+(?:de texto\\s+)?|whatsapp\\s+|wasap\\s+|wsp\\s+|sms\\s+|nota\\s+)?(?:$canal\\s+)?(?:a|al|a la|para)\\s+(.+?)\\s+(?:$canal\\s+)?(?:que|diciendo(?:le)? que|diciendo(?:le)?|con el mensaje|dile que)\\s+(.+)$")
+        val m = r1.find(t) ?: return null
+        val quien = f.originalDeGrupo(m, 1).replace(Regex("(?i)\\s*por\\s+(whatsapp|wasap|wsp|sms)$"), "").trim()
+        var texto = f.originalDeGrupo(m, 2).trim()
+        if (texto.isBlank()) return R("¿Qué le digo a $quien, $tr?", seguir = true)
+        texto = texto.replaceFirstChar { it.uppercase() }
+        val porSms = Regex("(sms|mensaje de texto|por texto)").containsMatchIn(t)
+
+        val c = Contactos.buscar(ctx, quien)
+        val numero = c?.numero ?: quien.filter { it.isDigit() || it == '+' }.takeIf { it.count { ch -> ch.isDigit() } >= 6 }
+        if (numero == null) {
+            return if (!ctx.tiene(Manifest.permission.READ_CONTACTS)) R("Necesito permiso para ver sus contactos, $tr.")
+            else R("No encontré a $quien en sus contactos, $tr.")
+        }
+        val nombre = c?.nombre ?: quien
+
+        if (porSms) {
+            if (!ctx.tiene(Manifest.permission.SEND_SMS)) return R("Necesito permiso para enviar mensajes de texto, $tr.")
+            return try {
+                val sms = ctx.getSystemService(SmsManager::class.java)
+                sms.sendMultipartTextMessage(numero, null, sms.divideMessage(texto), null, null)
+                R("Mensaje de texto enviado a $nombre, $tr.")
+            } catch (e: Exception) {
+                R("No pude enviar el mensaje de texto, $tr.")
+            }
+        }
+
+        val url = "https://api.whatsapp.com/send?phone=${Contactos.internacional(numero)}&text=" + Uri.encode(texto)
+        val auto = Prefs.whatsappAutomatico && ServicioAccesibilidad.activo
+        if (auto) ServicioAccesibilidad.prepararEnvio()
+        val abierto = listOf("com.whatsapp", "com.whatsapp.w4b", null).any { pkg ->
+            lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { if (pkg != null) setPackage(pkg) })
+        }
+        if (!abierto) return R("No encontré WhatsApp en este celular, $tr.")
+        return if (auto) R("Enviando a $nombre: «$texto».")
+        else R("Le dejé el mensaje listo para $nombre. Solo toque enviar, $tr.")
+    }
+
+    private fun leerNotificaciones(): Yarvis.Respuesta {
+        if (!ServicioNotificaciones.activo) {
+            lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            return R("Necesito acceso a sus notificaciones para leerlas, $tr. Active YARVIS en la pantalla que le abrí.")
+        }
+        val l = ServicioNotificaciones.recientes()
+        if (l.isEmpty()) return R("No tiene mensajes nuevos, $tr.")
+        val txt = l.takeLast(6).reversed().joinToString(". ") { "${it.titulo} por ${it.app}: ${it.texto}" }
+        ServicioNotificaciones.marcarLeidas()
+        return R("Tiene ${l.size} mensaje${if (l.size == 1) "" else "s"}. $txt.")
+    }
+
+    private fun llamar(quien: String): Yarvis.Respuesta {
+        val digitos = quien.filter { it.isDigit() || it == '+' }
+        val soloNumero = digitos.count { it.isDigit() } >= 3 && quien.count { it.isLetter() } <= 2
+        val numero: String
+        val nombre: String
+        if (soloNumero) {
+            numero = digitos
+            nombre = digitos.chunked(3).joinToString(" ")
+        } else {
+            if (!ctx.tiene(Manifest.permission.READ_CONTACTS)) return R("Necesito permiso para ver sus contactos, $tr.")
+            val c = Contactos.buscar(ctx, quien) ?: return R("No encontré a $quien en sus contactos, $tr.")
+            numero = c.numero
+            nombre = c.nombre
+        }
+        val accion = if (ctx.tiene(Manifest.permission.CALL_PHONE)) Intent.ACTION_CALL else Intent.ACTION_DIAL
+        val i = Intent(accion, Uri.parse("tel:" + Uri.encode(numero)))
+        return R("Llamando a $nombre, $tr.") { lanzar(i) }
+    }
+
+    private fun sitios(f: Frase, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta? {
+        val t = f.t
+        val sitio = "(youtube|you tube|tiktok|tik tok|facebook|spotify|instagram|google|netflix|wikipedia|mercado libre|amazon|twitter|x)"
+        val m = Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|busca(?:me)?|buscar|quiero ver|quiero escuchar|muestrame|abre|ver|mira|escuchar)\\s+(.+?)\\s+(?:en|de)\\s+$sitio$").find(t)
+        if (m != null) {
+            val q = f.originalDeGrupo(m, 1).replace(Regex("^(?i)(el|la|los|las|un|una)\\s+(video|cancion|tema)\\s+(de\\s+)?"), "")
+            return when (m.groupValues[2]) {
+                "youtube", "you tube" -> youtube(q, cb)
+                "tiktok", "tik tok" -> { abrirUrl("https://www.tiktok.com/search?q=" + Uri.encode(q)); R("Buscando $q en TikTok, $tr.") }
+                "facebook" -> { abrirUrl("https://www.facebook.com/search/top?q=" + Uri.encode(q)); R("Buscando $q en Facebook, $tr.") }
+                "instagram" -> { abrirUrl("https://www.instagram.com/explore/search/keyword/?q=" + Uri.encode(q)); R("Buscando $q en Instagram, $tr.") }
+                "spotify" -> {
+                    if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(q)))))
+                        abrirUrl("https://open.spotify.com/search/" + Uri.encode(q))
+                    R("Buscando $q en Spotify, $tr.")
+                }
+                "netflix" -> { abrirUrl("https://www.netflix.com/search?q=" + Uri.encode(q)); R("Buscando $q en Netflix, $tr.") }
+                "wikipedia" -> { abrirUrl("https://es.wikipedia.org/w/index.php?search=" + Uri.encode(q)); R("Buscando $q en Wikipedia, $tr.") }
+                "mercado libre" -> { abrirUrl("https://listado.mercadolibre.com.pe/" + Uri.encode(q)); R("Buscando $q en Mercado Libre, $tr.") }
+                "amazon" -> { abrirUrl("https://www.amazon.com/s?k=" + Uri.encode(q)); R("Buscando $q en Amazon, $tr.") }
+                "twitter", "x" -> { abrirUrl("https://x.com/search?q=" + Uri.encode(q)); R("Buscando $q en X, $tr.") }
+                else -> { buscarWeb(q); R("Buscando $q en Google, $tr.") }
+            }
+        }
+        // "pon / reproduce X" sin sitio → YouTube
+        Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|quiero ver|quiero escuchar)\\s+(?:el video de\\s+|la cancion de\\s+|la cancion\\s+|el video\\s+|el tema\\s+|musica de\\s+)?(.+)$").find(t)?.let { m2 ->
+            val q = f.originalDeGrupo(m2, 1)
+            if (Regex("^(una|un)\\s+(alarma|temporizador|recordatorio)").containsMatchIn(m2.groupValues[1])) return null
+            return youtube(q, cb)
+        }
+        return null
+    }
+
+    /** Busca el primer video en YouTube y lo reproduce directamente. */
+    private fun youtube(q: String, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta = fondo(cb) {
+        val id = try {
+            val c = URL("https://www.youtube.com/results?search_query=" + Uri.encode(q)).openConnection() as HttpURLConnection
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36")
+            c.setRequestProperty("Accept-Language", "es-PE,es;q=0.9")
+            c.connectTimeout = 10000
+            c.readTimeout = 12000
+            val html = c.inputStream.bufferedReader().use { it.readText() }
+            c.disconnect()
+            Regex("\"videoId\":\"([\\w-]{11})\"").find(html)?.groupValues?.get(1)
+        } catch (_: Exception) {
+            null
+        }
+        if (id != null) {
+            val app = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$id"))
+            principal.post { if (!lanzar(app)) abrirUrl("https://www.youtube.com/watch?v=$id") }
+            R("Reproduciendo $q en YouTube, $tr.")
+        } else {
+            principal.post {
+                val i = Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube").putExtra("query", q)
+                if (!lanzar(i)) abrirUrl("https://www.youtube.com/results?search_query=" + Uri.encode(q))
+            }
+            R("Buscando $q en YouTube, $tr.")
+        }
+    }
+
+    private fun abrirApp(nombre: String): Yarvis.Respuesta {
+        val especiales = mapOf(
+            "configuracion" to Settings.ACTION_SETTINGS, "ajustes" to Settings.ACTION_SETTINGS,
+            "ajustes de yarvis" to "", "configuracion de yarvis" to ""
+        )
+        if (nombre.contains("yarvis") && (nombre.contains("ajuste") || nombre.contains("configuracion"))) {
+            lanzar(Intent(ctx, AjustesActivity::class.java)); return R("Aquí tiene mis ajustes, $tr.")
+        }
+        especiales[nombre]?.let { if (it.isNotEmpty()) { lanzar(Intent(it)); return R("Abriendo ajustes, $tr.") } }
+        if (nombre in listOf("camara", "la camara")) { lanzar(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)); return R("Cámara lista, $tr.") }
+
+        val pm = ctx.packageManager
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+        val alias = mapOf("whatsapp" to listOf("wasap", "guasap", "wsp", "whats app", "wasa"), "youtube" to listOf("you tube", "yutub"), "tiktok" to listOf("tik tok"), "facebook" to listOf("feis", "face"))
+        var objetivo = nombre
+        for ((real, vars) in alias) if (vars.any { objetivo == it }) objetivo = real
+        var mejor: ResolveInfo? = null
+        var puntaje = 0
+        for (ri in apps) {
+            val et = Frase.normalizar(ri.loadLabel(pm).toString())
+            val p = when {
+                et == objetivo -> 100
+                et.replace(" ", "") == objetivo.replace(" ", "") -> 95
+                et.startsWith(objetivo) -> 80
+                et.length >= 3 && et.contains(objetivo) -> 60
+                et.length >= 4 && objetivo.contains(et) -> 50
+                else -> 0
+            }
+            if (p > puntaje) { puntaje = p; mejor = ri }
+        }
+        val elegido = mejor ?: return if (Regex("\\.(com|pe|org|net)").containsMatchIn(nombre)) abrirPagina(nombre) else R("No encontré la aplicación $nombre en su celular, $tr.")
+        val i = pm.getLaunchIntentForPackage(elegido.activityInfo.packageName) ?: return R("No pude abrir $nombre, $tr.")
+        return if (lanzar(i)) R("Abriendo ${elegido.loadLabel(pm)}, $tr.") else R("No pude abrir $nombre, $tr.")
+    }
+
+    private fun abrirPagina(nombre: String): Yarvis.Respuesta {
+        var n = nombre.replace(" punto ", ".").replace("punto ", ".").replace(" ", "")
+        if (!n.contains(".")) {
+            abrirUrl("https://www.google.com/search?btnI=1&q=" + Uri.encode(nombre))
+            return R("Abriendo la página de $nombre, $tr.")
+        }
+        if (!n.startsWith("http")) n = "https://$n"
+        abrirUrl(n)
+        return R("Abriendo $nombre, $tr.")
+    }
+
+    private fun linterna(on: Boolean): Boolean = try {
+        val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val id = cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
+        if (id == null) false else { cm.setTorchMode(id, on); true }
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun volumen(f: Frase): Yarvis.Respuesta {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val s = AudioManager.STREAM_MUSIC
+        val max = am.getStreamMaxVolume(s)
+        Regex("(?:volumen )?(?:al |en )?(\\d{1,3})\\s*(?:%|por ciento)").find(f.t)?.let {
+            val p = it.groupValues[1].toInt().coerceIn(0, 100)
+            am.setStreamVolume(s, (max * p / 100.0).toInt(), AudioManager.FLAG_SHOW_UI)
+            return R("Volumen al $p por ciento, $tr.")
+        }
+        when {
+            f.tiene("(maximo|al tope|full|a todo)") -> am.setStreamVolume(s, max, AudioManager.FLAG_SHOW_UI)
+            f.tiene("(minimo)") -> am.setStreamVolume(s, 1, AudioManager.FLAG_SHOW_UI)
+            f.tiene("(sube|subir|aumenta|mas)") -> repeat(3) { am.adjustStreamVolume(s, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI) }
+            f.tiene("(baja|bajar|disminuye|menos)") -> repeat(3) { am.adjustStreamVolume(s, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI) }
+            f.tiene("(silencia|silencio|mute|quita el sonido)") -> {
+                return R("Silenciando, $tr.") { am.adjustStreamVolume(s, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI) }
+            }
+            else -> return R("¿Subo o bajo el volumen, $tr?", seguir = true)
+        }
+        return R("Hecho, $tr.")
+    }
+
+    private fun modoSonido(f: Frase): Yarvis.Respuesta {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        return try {
+            when {
+                f.tiene("vibra") -> { am.ringerMode = AudioManager.RINGER_MODE_VIBRATE; R("Modo vibración activado, $tr.") }
+                f.tiene("silencio") -> {
+                    if (!nm.isNotificationPolicyAccessGranted) { pedirAccesoNoMolestar(); R("Necesito su permiso para el modo silencio, $tr. Active YARVIS en la pantalla que le abrí.") }
+                    else { am.ringerMode = AudioManager.RINGER_MODE_SILENT; R("Modo silencio activado, $tr.") }
+                }
+                else -> { am.ringerMode = AudioManager.RINGER_MODE_NORMAL; R("Sonido normal activado, $tr.") }
+            }
+        } catch (_: SecurityException) {
+            pedirAccesoNoMolestar()
+            R("Necesito su permiso para cambiar el modo de sonido, $tr.")
+        }
+    }
+
+    private fun noMolestar(activar: Boolean): Yarvis.Respuesta {
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        if (!nm.isNotificationPolicyAccessGranted) {
+            pedirAccesoNoMolestar()
+            return R("Necesito su permiso para controlar el modo no molestar, $tr. Active YARVIS en la pantalla que le abrí.")
+        }
+        nm.setInterruptionFilter(if (activar) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL)
+        return R(if (activar) "Modo no molestar activado, $tr." else "Modo no molestar desactivado, $tr.")
+    }
+
+    private fun pedirAccesoNoMolestar() = lanzar(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+
+    private fun brillo(f: Frase): Yarvis.Respuesta {
+        if (!Settings.System.canWrite(ctx)) {
+            lanzar(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + ctx.packageName)))
+            return R("Necesito permiso para cambiar el brillo, $tr. Actívelo en la pantalla que le abrí y vuelva a pedírmelo.")
+        }
+        val cr = ctx.contentResolver
+        Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+        val actual = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
+        val nuevo = when {
+            f.tiene("(maximo|al tope|full)") -> 255
+            f.tiene("(minimo)") -> 10
+            f.tiene("automatico") -> {
+                Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC)
+                return R("Brillo automático activado, $tr.")
+            }
+            f.tiene("(sube|aumenta|mas)") -> (actual + 60).coerceAtMost(255)
+            f.tiene("(baja|disminuye|menos)") -> (actual - 60).coerceAtLeast(10)
+            else -> Regex("(\\d{1,3})").find(f.t)?.groupValues?.get(1)?.toIntOrNull()?.let { (it.coerceIn(1, 100) * 255 / 100) } ?: return R("¿Subo o bajo el brillo, $tr?", seguir = true)
+        }
+        Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, nuevo)
+        return R("Brillo ajustado, $tr.")
+    }
+
+    private fun global(accion: Int, ok: String): Yarvis.Respuesta {
+        if (!ServicioAccesibilidad.activo) {
+            lanzar(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return R("Para eso necesito el permiso de accesibilidad, $tr. Active YARVIS en la pantalla que le abrí.")
+        }
+        return R(ok) { principal.postDelayed({ ServicioAccesibilidad.accion(accion) }, 300) }
+    }
+
+    private fun tecla(codigo: Int, ok: String): Yarvis.Respuesta {
+        val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val ahora = SystemClock.uptimeMillis()
+        am.dispatchMediaKeyEvent(KeyEvent(ahora, ahora, KeyEvent.ACTION_DOWN, codigo, 0))
+        am.dispatchMediaKeyEvent(KeyEvent(ahora, ahora, KeyEvent.ACTION_UP, codigo, 0))
+        return R(ok)
+    }
+
+    private fun guardarNota(nota: String) {
+        val limpia = nota.trim().replaceFirstChar { it.uppercase() }
+        Prefs.notas = (Prefs.notas + "\n" + limpia).trim()
+    }
+
+    private fun buscarWeb(q: String) {
+        val i = Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, q)
+        if (!lanzar(i)) abrirUrl("https://www.google.com/search?q=" + Uri.encode(q))
+    }
+
+    private fun abrirUrl(url: String) = lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+    fun lanzar(i: Intent): Boolean = try {
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (i.resolveActivity(ctx.packageManager) == null && i.`package` != null) false
+        else { ctx.startActivity(i); true }
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: SecurityException) {
+        false
+    }
+
+    // =====================================================================
+    //  Utilidades
+    // =====================================================================
+
+    private fun saludo(): String {
+        val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        return when {
+            h < 12 -> "Buenos días"
+            h < 19 -> "Buenas tardes"
+            else -> "Buenas noches"
+        }
+    }
+
+    fun saludoInicial(): String {
+        val extra = listOf(
+            "Todos los sistemas en línea.", "Sistemas operativos al cien por ciento.", "Es un placer verle de nuevo."
+        ).random()
+        return "${saludo()}, $tr. $extra ¿En qué puedo ayudarle?"
+    }
+
+    private fun duracionTexto(seg: Int): String {
+        val h = seg / 3600
+        val m = (seg % 3600) / 60
+        val s = seg % 60
+        val partes = mutableListOf<String>()
+        if (h > 0) partes.add("$h hora${if (h == 1) "" else "s"}")
+        if (m > 0) partes.add("$m minuto${if (m == 1) "" else "s"}")
+        if (s > 0) partes.add("$s segundo${if (s == 1) "" else "s"}")
+        return partes.joinToString(" y ")
+    }
+
+    private fun numero(x: Double): String =
+        if (x == floor(x) && abs(x) < 1e15) x.toLong().toString()
+        else String.format(es, "%.4f", x).trimEnd('0').trimEnd(',', '.')
+
+    private val chistes = listOf(
+        "¿Por qué la computadora fue al médico? Porque tenía un virus. No se preocupe, yo estoy vacunado.",
+        "Le pregunté al wifi si me quería. Me dijo que sí, pero solo cuando estoy cerca.",
+        "¿Qué le dijo un bit a otro bit? Nos vemos en el bus.",
+        "Un programador va a la tienda. Su esposa le dice: compra un pan, y si hay huevos, trae seis. Volvió con seis panes.",
+        "Mi batería y yo tenemos algo en común: al final del día, ambos necesitamos recargarnos.",
+        "¿Cuál es el colmo de un celular? Tener muchas aplicaciones y ninguna aplicación en la vida.",
+        "Intenté organizar un torneo de escondidas entre computadoras, pero fue imposible: los buenos escondites siempre estaban ocupados por los archivos temporales."
+    )
+}

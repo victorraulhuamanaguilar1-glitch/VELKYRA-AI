@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VELKYRA AI</string>
+    <string name="app_name">YARVIS</string>
+    <string name="desc_accesibilidad">Permite a YARVIS enviar tus mensajes de WhatsApp sin que toques la pantalla, bloquear el celular, tomar capturas y volver al inicio con tu voz. YARVIS no guarda ni comparte lo que hay en tu pantalla.</string>
 </resources>

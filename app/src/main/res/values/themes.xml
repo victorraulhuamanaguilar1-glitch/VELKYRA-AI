@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Tema.Velkyra" parent="android:Theme.Material.NoActionBar">
+    <style name="Tema.Yarvis" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/fondo</item>
         <item name="android:statusBarColor">@color/fondo</item>
         <item name="android:navigationBarColor">@color/fondo</item>
         <item name="android:colorAccent">@color/cian</item>
         <item name="android:colorPrimary">@color/fondo</item>
+        <item name="android:colorControlActivated">@color/cian</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    <style name="Tema.Yarvis.Arranque">
+        <item name="android:windowSplashScreenBackground">@color/fondo</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
     </style>
 </resources>

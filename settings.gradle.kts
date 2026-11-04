@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "VelkyraAI"
+rootProject.name = "Yarvis"
 include(":app")
