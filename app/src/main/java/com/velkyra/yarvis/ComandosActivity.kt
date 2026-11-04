@@ -22,7 +22,7 @@ class ComandosActivity : Base() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val cuerpo = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        cuerpo.addView(texto("Diga «Yarvis» y luego cualquiera de estas órdenes, o toque una para probarla.", 16f, Ui.TEXTO_SUAVE))
+        cuerpo.addView(texto("Diga «${Prefs.palabraActivacion}» y luego cualquiera de estas órdenes, o toque una para probarla.", 16f, Ui.TEXTO_SUAVE))
         for ((cat, ejemplos) in categorias) {
             val t = tarjeta(cat)
             for (e in ejemplos) {

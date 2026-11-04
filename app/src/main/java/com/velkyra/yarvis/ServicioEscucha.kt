@@ -42,14 +42,36 @@ class ServicioEscucha : Service(), RecognitionListener {
         val activo get() = instancia != null
         val escuchandoPalabra get() = instancia?.speech != null
 
+        /** Palabras parecidas o comunes que sirven de «señuelo» para que no se active por error. */
+        private val SENUELOS = listOf(
+            "javier", "jardines", "jardín", "garbanzo", "travis", "marvin", "darwin", "jarabe", "jarra", "jamás", "harás",
+            "jabón", "harvard", "hola", "gracias", "bueno", "claro", "ahora", "vamos", "mira", "casa", "agua", "mamá", "papá"
+        )
+
+        private fun usaPalabraPorDefecto(): Boolean {
+            val p = Frase.normalizar(Prefs.palabraActivacion)
+            return p.contains("yarvis") || p.contains("jarvis")
+        }
+
         /**
-         * Gramática del reconocedor sin internet: solo busca «jarvis» (así entiende «Yarvis»).
-         * Las demás son palabras parecidas que sirven de «señuelo» para que no se active por error.
+         * Gramática del reconocedor sin internet: busca la palabra del usuario tal como la aprendió
+         * en el entrenamiento (y «jarvis», que es como entiende «Yarvis» por defecto).
          */
-        private val GRAMATICA = org.json.JSONArray(
-            listOf("jarvis", "javier", "jardines", "jardín", "garbanzo", "travis", "marvin", "darwin",
-                "jarabe", "jarra", "jamás", "harás", "jabón", "harvard", "[unk]")
-        ).toString()
+        fun gramatica(): String = gramatica(Prefs.muestras())
+
+        /** Gramática sin muestras: solo «jarvis» y señuelos (la que mejor evita falsas activaciones). */
+        fun gramaticaPorDefecto(): String = gramatica(emptyList(), true)
+
+        private fun gramatica(muestras: List<String>, forzarJarvis: Boolean = false): String {
+            val frases = LinkedHashSet<String>()
+            frases.addAll(muestras.map { it.lowercase() })
+            if (forzarJarvis) frases.add("jarvis")
+            if (usaPalabraPorDefecto() || frases.isEmpty()) frases.add("jarvis")
+            val usadas = frases.flatMap { it.split(" ") }.toSet()
+            frases.addAll(SENUELOS.filter { it !in usadas && Frase.normalizar(it) !in usadas })
+            frases.add("[unk]")
+            return org.json.JSONArray(frases.toList()).toString()
+        }
 
         /** Variantes de cómo el reconocedor puede escribir «Yarvis». */
         private val palabraJunta = Regex("(y|ll|j|h|g|i|sh)ar(v|b)i(s|z|ss|ces)")
@@ -62,9 +84,16 @@ class ServicioEscucha : Service(), RecognitionListener {
         @Volatile
         var alOir: ((String) -> Unit)? = null
 
+        fun esJarvis(texto: String): Boolean = Regex("(^|\\s)jarvis($|\\s)").containsMatchIn(Frase.normalizar(texto))
+
         fun contienePalabra(texto: String): Boolean {
             val n = Frase.normalizar(texto)
             if (n.isBlank()) return false
+            // Lo aprendido en el entrenamiento solo cuenta al INICIO de la frase (como se dice una palabra de activación)
+            for (m in Prefs.muestras().map { Frase.normalizar(it) }.filter { it.isNotBlank() }) {
+                if (Regex("^(oye |hey |ey )?" + Regex.escape(m) + "($|\\s)").containsMatchIn(n)) return true
+            }
+            if (!usaPalabraPorDefecto() && Prefs.muestras().isNotEmpty()) return false
             if (n.split(" ").any { it in palabrasSueltas }) return true
             val extras = try { Prefs.palabrasExtra } catch (_: Exception) { "" }
             for (e in extras.split(",").map { Frase.normalizar(it) }.filter { it.length >= 3 }) {
@@ -95,6 +124,9 @@ class ServicioEscucha : Service(), RecognitionListener {
                 instancia?.revisar()
             }
         }
+
+        /** Vuelve a crear el reconocedor (por ejemplo, después de entrenar una palabra nueva). */
+        fun reiniciar() { instancia?.let { it.detenerParaReinicio(); it.revisar() } }
 
         fun pausar() { instancia?.pausaTemporal(true) }
         fun reanudar() { instancia?.pausaTemporal(false) }
@@ -157,21 +189,14 @@ class ServicioEscucha : Service(), RecognitionListener {
         if (modelo != null || cargando) return
         cargando = true
         actualizarNotificacion()
-        Thread {
-            val m = try {
-                LibVosk.setLogLevel(LogLevel.WARNINGS)
-                val ruta = ModeloVoz.preparar(this)
-                if (ruta == null) null else Model(ruta)
-            } catch (e: Throwable) {
-                null
-            }
-            principal.post {
-                cargando = false
-                modelo = m
-                revisar()
-            }
-        }.start()
+        MotorVoz.obtener(this) { m ->
+            cargando = false
+            modelo = m
+            revisar()
+        }
     }
+
+    fun detenerParaReinicio() = detenerEscucha()
 
     fun revisar() {
         val debe = modelo != null && !pausado && Prefs.escuchaActiva &&
@@ -191,7 +216,7 @@ class ServicioEscucha : Service(), RecognitionListener {
         if (speech != null) return
         val m = modelo ?: return
         try {
-            val rec = Recognizer(m, 16000f, GRAMATICA)
+            val rec = Recognizer(m, 16000f, gramatica())
             try { rec.setWords(true) } catch (_: Throwable) {}
             val s = SpeechService(rec, 16000f)
             s.startListening(this)
@@ -220,16 +245,15 @@ class ServicioEscucha : Service(), RecognitionListener {
             val palabras = o.optJSONArray("result")
             if (palabras != null) {
                 // Resultado final: se exige una confianza mínima para «jarvis»
-                confianzaOk = false
-                for (i in 0 until palabras.length()) {
-                    val w = palabras.getJSONObject(i)
-                    if (w.optString("word") == "jarvis" && w.optDouble("conf", 1.0) >= 0.35) confianzaOk = true
-                }
-            }
-            o.optString("partial").ifBlank { o.optString("text") }
+                // Resultado final: solo cuentan las palabras reconocidas con suficiente confianza
+                val seguras = (0 until palabras.length()).map { palabras.getJSONObject(it) }
+                    .filter { it.optDouble("conf", 1.0) >= 0.35 }.joinToString(" ") { it.optString("word") }
+                confianzaOk = seguras.isNotBlank()
+                if (confianzaOk) seguras else ""
+            } else o.optString("partial").ifBlank { o.optString("text") }
         } catch (_: Exception) { "" }
         if (texto.isBlank() || texto == "[unk]") return
-        alOir?.invoke(texto.replace("jarvis", "yarvis").replace("[unk]", "…"))
+        alOir?.invoke(texto.replace("[unk]", "…"))
         val ahora = SystemClock.elapsedRealtime()
         if (ahora - ultimaActivacion < 2500 || ahora - reanudadoEn < 700) return
         if (confianzaOk && contienePalabra(texto)) {
@@ -271,7 +295,7 @@ class ServicioEscucha : Service(), RecognitionListener {
             cargando -> "Preparando el reconocimiento de voz…"
             !activa -> "Escucha en pausa. Toque «Reanudar» para activarla."
             modelo == null -> "No se pudo cargar el modelo de voz."
-            speech != null -> "Diga «Yarvis» para activarme."
+            speech != null -> "Diga «${Prefs.palabraActivacion}» para activarme."
             Prefs.modoEscucha == "pantalla" && !pantallaEncendida -> "En espera hasta que encienda la pantalla."
             else -> "Atendiendo su solicitud…"
         }
@@ -300,10 +324,49 @@ class ServicioEscucha : Service(), RecognitionListener {
     override fun onDestroy() {
         detenerEscucha()
         try { unregisterReceiver(receptorPantalla) } catch (_: Exception) {}
-        modelo?.let { try { it.close() } catch (_: Exception) {} }
         modelo = null
         if (instancia === this) instancia = null
         super.onDestroy()
+    }
+}
+
+/** Modelo de voz sin internet, cargado una sola vez y compartido por el servicio y el entrenamiento. */
+object MotorVoz {
+    @Volatile
+    var modelo: Model? = null
+        private set
+    var error: String? = null
+        private set
+    private var cargando = false
+    private val esperando = mutableListOf<(Model?) -> Unit>()
+    private val principal = Handler(Looper.getMainLooper())
+
+    /** Debe llamarse desde el hilo principal. */
+    fun obtener(ctx: Context, listo: (Model?) -> Unit) {
+        modelo?.let { listo(it); return }
+        esperando.add(listo)
+        if (cargando) return
+        cargando = true
+        val app = ctx.applicationContext
+        Thread {
+            var err: String? = null
+            val m = try {
+                LibVosk.setLogLevel(LogLevel.WARNINGS)
+                val ruta = ModeloVoz.preparar(app)
+                if (ruta == null) { err = "No se encontró el modelo de voz dentro de la app."; null } else Model(ruta)
+            } catch (e: Throwable) {
+                err = "No se pudo cargar el modelo de voz: ${e.javaClass.simpleName}"
+                null
+            }
+            principal.post {
+                modelo = m
+                error = err
+                cargando = false
+                val copia = esperando.toList()
+                esperando.clear()
+                copia.forEach { it(m) }
+            }
+        }.start()
     }
 }
 

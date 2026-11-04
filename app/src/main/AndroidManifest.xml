@@ -114,6 +114,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".EntrenamientoActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ComandosActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

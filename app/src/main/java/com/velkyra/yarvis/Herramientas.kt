@@ -253,7 +253,7 @@ object Avisos {
         val n = Notification.Builder(ctx, CANAL_SISTEMA)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("YARVIS está listo")
-            .setContentText("Toque aquí para activar la escucha de «Yarvis».")
+            .setContentText("Toque aquí para activar la escucha de «${Prefs.palabraActivacion}».")
             .setContentIntent(abrirApp(ctx, 51))
             .setAutoCancel(true)
             .build()

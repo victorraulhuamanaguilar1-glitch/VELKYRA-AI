@@ -126,7 +126,7 @@ class Cerebro(private val ctx: Context) {
         if (f.tiene("(activa la escucha|vuelve a escuchar|escucha siempre|activa la palabra)")) {
             Prefs.escuchaActiva = true
             ServicioEscucha.actualizar(ctx)
-            return R("Escucha activada, $tr. Diga «Yarvis» cuando me necesite.")
+            return R("Escucha activada, $tr. Diga «${Prefs.palabraActivacion}» cuando me necesite.")
         }
         if (f.tiene("^(cancela|cancelar|olvidalo|olvida eso|nada|no nada|ninguna|dejalo|no importa)$")) {
             return R("Como desee, $tr.", cerrar = true)

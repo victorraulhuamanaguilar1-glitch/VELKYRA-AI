@@ -123,7 +123,7 @@ object Yarvis {
                         silencios++
                         escucharOrden(miSesion)
                     } else {
-                        for (o in observadores) o.alParcial(if (enConversacion) "Conversación terminada. Diga «Yarvis» cuando me necesite." else "No le escuché. Toque el núcleo o diga «Yarvis».")
+                        for (o in observadores) o.alParcial(if (enConversacion) "Conversación terminada. Diga «${Prefs.palabraActivacion}» cuando me necesite." else "No le escuché. Toque el núcleo o diga «${Prefs.palabraActivacion}».")
                         enConversacion = false
                         terminar()
                     }

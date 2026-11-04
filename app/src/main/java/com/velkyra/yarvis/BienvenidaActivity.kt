@@ -40,7 +40,7 @@ class BienvenidaActivity : Base() {
     private lateinit var contenedor: FrameLayout
     private lateinit var puntos: LinearLayout
     private var paso = 0
-    private val totalPasos = 6
+    private val totalPasos = 7
     private var soloPermisos = false
 
     // Datos que se van llenando
@@ -81,6 +81,7 @@ class BienvenidaActivity : Base() {
             2 -> pasoVoz()
             3 -> pasoIA()
             4 -> pasoPermisos()
+            5 -> pasoPalabra()
             else -> pasoListo()
         }
         contenedor.removeAllViews()
@@ -266,7 +267,7 @@ class BienvenidaActivity : Base() {
     private data class Especial(val id: String, val titulo: String, val detalle: String, val ok: () -> Boolean, val abrir: () -> Unit)
 
     private fun especiales(): List<Especial> = listOf(
-        Especial("overlay", "Aparecer sobre otras apps", "Para responderle al decir «Yarvis» mientras usa otra aplicación.",
+        Especial("overlay", "Aparecer sobre otras apps", "Para responderle al decir su palabra mientras usa otra aplicación.",
             { Settings.canDrawOverlays(this) },
             { abrir(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }),
         Especial("bateria", "Funcionar sin restricciones", "Para que el sistema no me apague en segundo plano.",
@@ -366,13 +367,30 @@ class BienvenidaActivity : Base() {
     }
 
     // ------------------------------------------------------------------ 5
+    private fun pasoPalabra(): View = plantilla("Su palabra de activación", "Enséñeme cómo me llama. Dirá su palabra 5 veces para que aprenda a reconocer SU voz, incluso sin internet.", {
+        val t = tarjeta()
+        t.addView(texto("Palabra actual: «${Prefs.palabraActivacion}»", 18f, Ui.TEXTO, Ui.fuerte))
+        t.agregar(texto(if (Prefs.muestras().isNotEmpty()) "✓ Ya entrenada" else "Toma menos de un minuto. Puede elegir Yarvis, Jarvis, Velkyra o la que prefiera.", 15f, if (Prefs.muestras().isNotEmpty()) Ui.VERDE else Ui.TEXTO_SUAVE), arriba = dp(6))
+        addView(t)
+        agregar(boton("ENTRENAR AHORA", true) {
+            startActivityForResult(Intent(this@BienvenidaActivity, EntrenamientoActivity::class.java).putExtra(EntrenamientoActivity.EXTRA_DESDE_BIENVENIDA, true), 40)
+        }, arriba = dp(18))
+    }, "CONTINUAR", { mostrar(6) }, "ATRÁS", { mostrar(4) })
+
+    @Deprecated("API de Activity")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 40) mostrar(if (resultCode == RESULT_OK) 6 else 5)
+    }
+
+    // ------------------------------------------------------------------ 6
     private fun pasoListo(): View {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(24), 0, dp(24), dp(22)) }
         col.agregar(View(this), alto = 0, peso = 1f)
         col.agregar(NucleoView(this).apply { estado = Yarvis.Estado.HABLANDO }, ancho = dp(200), alto = dp(200)).also { (it.layoutParams as LinearLayout.LayoutParams).gravity = Gravity.CENTER }
         col.agregar(texto("Todo listo, ${Prefs.trato}.", 26f, Ui.TEXTO, Ui.titulo).apply { gravity = Gravity.CENTER }, arriba = dp(22))
-        col.agregar(texto("Diga «Yarvis» en cualquier momento, incluso con el celular bloqueado. También puede tocar el núcleo o escribirme.", 18f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER }, arriba = dp(10))
-        col.agregar(texto("Pruebe: «Yarvis, ¿qué hora es?»  ·  «Yarvis, ¿cómo está el clima?»", 16f, Ui.CIAN_CLARO).apply { gravity = Gravity.CENTER }, arriba = dp(14))
+        col.agregar(texto("Diga «${Prefs.palabraActivacion}» en cualquier momento, incluso con el celular bloqueado. También puede tocar el núcleo o escribirme.", 18f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER }, arriba = dp(10))
+        col.agregar(texto("Pruebe: «${Prefs.palabraActivacion}, ¿qué hora es?»  ·  «${Prefs.palabraActivacion}, ¿cómo está el clima?»", 16f, Ui.CIAN_CLARO).apply { gravity = Gravity.CENTER }, arriba = dp(14))
         col.agregar(View(this), alto = 0, peso = 1f)
         col.agregar(boton("INICIAR YARVIS", true) {
             Prefs.configurado = true

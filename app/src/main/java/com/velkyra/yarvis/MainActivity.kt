@@ -132,7 +132,7 @@ class MainActivity : Base(), Yarvis.Observador {
         }
         col.agregar(nucleo, alto = dp(230), arriba = dp(6))
 
-        subtitulo = texto("Diga «Yarvis» o toque el núcleo", 18f, Ui.CIAN_CLARO, Ui.fuerte).apply {
+        subtitulo = texto("Diga «${Prefs.palabraActivacion}» o toque el núcleo", 18f, Ui.CIAN_CLARO, Ui.fuerte).apply {
             gravity = Gravity.CENTER
             maxLines = 3
             ellipsize = TextUtils.TruncateAt.END
@@ -224,7 +224,7 @@ class MainActivity : Base(), Yarvis.Observador {
         bateriaTxt.setTextColor(if (n <= 15 && !bm.isCharging) Ui.ROJO else if (bm.isCharging) Ui.VERDE else Ui.TEXTO)
         val escuchando = ServicioEscucha.escuchandoPalabra
         estadoTxt.text = when {
-            escuchando -> "●  EN LÍNEA · DIGA «YARVIS»"
+            escuchando -> "●  EN LÍNEA · DIGA «${Prefs.palabraActivacion.uppercase()}»"
             !Prefs.escuchaActiva -> "●  ESCUCHA EN PAUSA"
             Yarvis.estado != Yarvis.Estado.REPOSO -> "●  ATENDIENDO"
             ServicioEscucha.activo -> "●  PREPARANDO ESCUCHA…"
@@ -245,7 +245,7 @@ class MainActivity : Base(), Yarvis.Observador {
     // --- Observador -------------------------------------------------------
     override fun alEstado(estado: Yarvis.Estado) {
         nucleo.estado = estado
-        if (estado == Yarvis.Estado.REPOSO) h.postDelayed({ if (Yarvis.estado == Yarvis.Estado.REPOSO) subtitulo.text = "Diga «Yarvis» o toque el núcleo" }, 4000)
+        if (estado == Yarvis.Estado.REPOSO) h.postDelayed({ if (Yarvis.estado == Yarvis.Estado.REPOSO) subtitulo.text = "Diga «${Prefs.palabraActivacion}» o toque el núcleo" }, 4000)
         refrescarDatos()
     }
 

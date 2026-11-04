@@ -117,6 +117,21 @@ object Prefs {
         get() = b("wa_auto", true)
         set(v) = pb("wa_auto", v)
 
+    /** La palabra con la que el usuario llama a YARVIS. */
+    var palabraActivacion: String
+        get() = s("palabra_activacion", "Yarvis").ifBlank { "Yarvis" }
+        set(v) = ps("palabra_activacion", v.trim())
+
+    /** Cómo escucha el reconocedor sin internet la palabra del usuario (aprendido en el entrenamiento). JSON. */
+    var muestrasPalabra: String
+        get() = s("muestras_palabra", "[]")
+        set(v) = ps("muestras_palabra", v)
+
+    fun muestras(): List<String> = try {
+        val a = org.json.JSONArray(muestrasPalabra)
+        (0 until a.length()).map { a.getString(it) }.filter { it.isNotBlank() }
+    } catch (_: Exception) { emptyList() }
+
     /** Palabras extra que también activan a YARVIS (separadas por coma). */
     var palabrasExtra: String
         get() = s("palabras_extra", "")

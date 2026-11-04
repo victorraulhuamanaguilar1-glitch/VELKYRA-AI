@@ -69,12 +69,12 @@ class AjustesActivity : Base() {
         voz.agregar(texto("Velocidad", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
         voz.addView(deslizador(60, ((Prefs.velocidad - 0.7f) * 100).toInt()) { Prefs.velocidad = 0.7f + it / 100f; Voz.aplicarVoz() })
         voz.agregar(boton("PROBAR", false) { Voz.hablar("Buenas noches, ${Prefs.trato}. Así sueno ahora.") }, arriba = dp(10))
-        voz.agregar(interruptor("Responder al activarme", "Decir «¿Sí, ${Prefs.trato}?» al escuchar «Yarvis». Si lo apaga, solo sonará un tono.", Prefs.responderAlActivar) { Prefs.responderAlActivar = it }, arriba = dp(8))
+        voz.agregar(interruptor("Responder al activarme", "Decir «¿Sí, ${Prefs.trato}?» al escuchar «${Prefs.palabraActivacion}». Si lo apaga, solo sonará un tono.", Prefs.responderAlActivar) { Prefs.responderAlActivar = it }, arriba = dp(8))
 
         // ACTIVACIÓN
         val act = seccion("Activación por voz")
-        act.addView(interruptor("Conversación continua", "Después de responder sigo escuchándole, sin decir «Yarvis». Para terminar diga «eso es todo», «gracias, es todo» o «adiós».", Prefs.conversacionContinua) { Prefs.conversacionContinua = it })
-        act.addView(interruptor("Escuchar «Yarvis»", "Funciona sin internet. Nada de lo que escucho sale de su celular.", Prefs.escuchaActiva) {
+        act.addView(interruptor("Conversación continua", "Después de responder sigo escuchándole, sin decir «${Prefs.palabraActivacion}». Para terminar diga «eso es todo», «gracias, es todo» o «adiós».", Prefs.conversacionContinua) { Prefs.conversacionContinua = it })
+        act.addView(interruptor("Escuchar «${Prefs.palabraActivacion}»", "Funciona sin internet. Nada de lo que escucho sale de su celular.", Prefs.escuchaActiva) {
             Prefs.escuchaActiva = it
             if (it) ServicioEscucha.iniciar(this) else ServicioEscucha.actualizar(this)
         })
@@ -92,16 +92,18 @@ class AjustesActivity : Base() {
         })
         act.agregar(texto("En Xiaomi, Huawei, Oppo, Vivo o Samsung, active también «Inicio automático» y quite las restricciones de batería de YARVIS en los ajustes del celular para que nunca se detenga.", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
 
-        // PRUEBA DE ACTIVACIÓN
-        val prueba = seccion("Prueba de la palabra «Yarvis»")
-        prueba.addView(texto("Diga «Yarvis» cerca del celular. Aquí verá lo que entiende el reconocedor sin internet:", 15f, Ui.TEXTO))
-        val oido = texto(if (ServicioEscucha.escuchandoPalabra) "…" else "La escucha no está activa.", 18f, Ui.CIAN_CLARO, Ui.fuerte)
-        prueba.agregar(oido, arriba = dp(8))
-        ServicioEscucha.alOir = { t -> runOnUiThread { oido.text = "«$t»" + if (ServicioEscucha.contienePalabra(t)) "  ✓" else "" } }
-        prueba.agregar(texto("Si al decir «Yarvis» aparece otra palabra (por ejemplo «llar vis»), escríbala aquí para que también me active. Puede poner varias separadas por coma.", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
-        val cExtra = campo("Ejemplo: llar vis, yar bis", Prefs.palabrasExtra)
-        prueba.agregar(cExtra, arriba = dp(6))
-        prueba.agregar(boton("GUARDAR PALABRAS", false) { Prefs.palabrasExtra = cExtra.text.toString(); Voz.hablar("Guardado, ${Prefs.trato}.") }, arriba = dp(10))
+        // PALABRA DE ACTIVACIÓN
+        val pal = seccion("Palabra de activación")
+        val entrenada = Prefs.muestras().isNotEmpty()
+        pal.addView(texto("Palabra actual: «${Prefs.palabraActivacion}»", 18f, Ui.TEXTO, Ui.fuerte))
+        pal.agregar(texto(if (entrenada) "✓ Entrenada con su voz" else "○ Sin entrenar (se recomienda entrenarla)", 15f, if (entrenada) Ui.VERDE else Ui.AMBAR, Ui.fuerte), arriba = dp(4))
+        pal.agregar(boton(if (entrenada) "VOLVER A ENTRENAR / CAMBIAR PALABRA" else "ENTRENAR MI PALABRA", !entrenada) {
+            startActivity(android.content.Intent(this, EntrenamientoActivity::class.java))
+        }, arriba = dp(12))
+        pal.agregar(texto("Prueba en vivo — diga su palabra y mire lo que entiendo:", 14f, Ui.TEXTO_SUAVE), arriba = dp(14))
+        val oido = texto(if (ServicioEscucha.escuchandoPalabra) "…" else "La escucha no está activa en este momento.", 17f, Ui.CIAN_CLARO, Ui.fuerte)
+        pal.agregar(oido, arriba = dp(4))
+        ServicioEscucha.alOir = { t -> runOnUiThread { oido.text = "«$t»" + if (ServicioEscucha.contienePalabra(t)) "  ✓ ¡me activo!" else "" } }
 
         // IA
         val ia = seccion("Inteligencia artificial")
