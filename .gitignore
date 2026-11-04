@@ -4,3 +4,6 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+app/src/main/jniLibs/
+app/src/main/assets/voces/
+app/src/main/assets/modelo-es/

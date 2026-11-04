@@ -51,7 +51,7 @@ object Yarvis {
     var pantallaVisible = false
 
     private var sesion = 0
-    private var silencios = 0
+    private var ultimaVoz = 0L
     private var enConversacion = false
     private var turnoPorVoz = false
     private var tono: ToneGenerator? = null
@@ -62,6 +62,30 @@ object Yarvis {
         ctx = c.applicationContext
         Voz.init(ctx)
         cerebro = Cerebro(ctx)
+        cargarHistorial()
+    }
+
+    /** Última respuesta dicha (para «repite»). */
+    val ultimaRespuesta: String get() = historial.lastOrNull { !it.deUsuario }?.texto?.substringBefore("\n[") ?: ""
+
+    private fun cargarHistorial() {
+        try {
+            val a = org.json.JSONArray(ctx.getSharedPreferences("yarvis", Context.MODE_PRIVATE).getString("historial", "[]"))
+            for (i in 0 until a.length()) {
+                val o = a.getJSONObject(i)
+                historial.add(Mensaje(o.getBoolean("u"), o.getString("t")))
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun guardarHistorial() {
+        try {
+            val a = org.json.JSONArray()
+            for (m in historial.takeLast(40)) a.put(org.json.JSONObject().put("u", m.deUsuario).put("t", m.texto))
+            ctx.getSharedPreferences("yarvis", Context.MODE_PRIVATE).edit().putString("historial", a.toString()).apply()
+        } catch (_: Exception) {
+        }
     }
 
     fun observar(o: Observador) { if (!observadores.contains(o)) observadores.add(o) }
@@ -75,18 +99,20 @@ object Yarvis {
     private fun agregar(m: Mensaje) {
         historial.add(m)
         while (historial.size > 60) historial.removeAt(0)
+        guardarHistorial()
         for (o in observadores) o.alMensaje(m)
     }
 
     fun borrarHistorial() {
         historial.clear()
+        guardarHistorial()
         cerebro.olvidarConversacion()
     }
 
     /** Despierta a YARVIS (por la palabra "Yarvis", al tocar el núcleo o desde la notificación). */
     fun activar(porPalabra: Boolean) = principal.post {
         val miSesion = ++sesion
-        silencios = 0
+        ultimaVoz = System.currentTimeMillis()
         enConversacion = false
         Oido.cancelar()
         Voz.detener()
@@ -118,17 +144,17 @@ object Yarvis {
             override fun resultado(texto: String?) {
                 if (miSesion != sesion) return
                 if (texto.isNullOrBlank()) {
-                    if (enConversacion && silencios < 2) {
-                        // En conversación: espera un poco más antes de cerrar
-                        silencios++
-                        escucharOrden(miSesion)
+                    val esperado = System.currentTimeMillis() - ultimaVoz
+                    if (enConversacion && esperado < Prefs.esperaConversacion * 1000L) {
+                        // En conversación: sigue esperando hasta completar el tiempo configurado
+                        principal.postDelayed({ if (miSesion == sesion) escucharOrden(miSesion) }, 250)
                     } else {
                         for (o in observadores) o.alParcial(if (enConversacion) "Conversación terminada. Diga «${Prefs.palabraActivacion}» cuando me necesite." else "No le escuché. Toque el núcleo o diga «${Prefs.palabraActivacion}».")
                         enConversacion = false
                         terminar()
                     }
                 } else {
-                    silencios = 0
+                    ultimaVoz = System.currentTimeMillis()
                     procesar(texto, miSesion)
                 }
             }
@@ -166,6 +192,7 @@ object Yarvis {
             if (miSesion != sesion) return@hablar
             r.despues?.invoke()
             if (continuar) {
+                ultimaVoz = System.currentTimeMillis()
                 if (!r.seguir) enConversacion = true
                 escucharOrden(miSesion)
             } else {

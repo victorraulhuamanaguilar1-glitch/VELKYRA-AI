@@ -52,6 +52,7 @@ class AjustesActivity : Base() {
         perfil.agregar(texto("Ciudad para el clima (si no hay GPS)", 14f, Ui.TEXTO_SUAVE), arriba = dp(12))
         val cCiudad = campo("Ejemplo: Juliaca", Prefs.ciudad)
         perfil.agregar(cCiudad, arriba = dp(4))
+        perfil.agregar(interruptor("Yo soy el creador de YARVIS", "Si le pregunta «¿quién te creó?», responderá que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(8))
         perfil.agregar(boton("GUARDAR PERFIL", false) {
             Prefs.nombre = cNombre.text.toString()
             Prefs.tratoGuardado = cTrato.text.toString()
@@ -61,18 +62,15 @@ class AjustesActivity : Base() {
 
         // VOZ
         val voz = seccion("Voz")
-        val actual = Voz.opciones().firstOrNull { it.voz.name == Voz.vozActual() }?.etiqueta ?: "Predeterminada"
-        voz.addView(texto("Voz actual: $actual", 16f, Ui.TEXTO))
-        voz.agregar(boton("CAMBIAR VOZ", false) { elegirVoz() }, arriba = dp(10))
-        voz.agregar(texto("Tono (grave ← → agudo)", 14f, Ui.TEXTO_SUAVE), arriba = dp(14))
-        voz.addView(deslizador(80, ((Prefs.tono - 0.5f) * 100).toInt()) { Prefs.tono = 0.5f + it / 100f; Voz.aplicarVoz() })
-        voz.agregar(texto("Velocidad", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
-        voz.addView(deslizador(60, ((Prefs.velocidad - 0.7f) * 100).toInt()) { Prefs.velocidad = 0.7f + it / 100f; Voz.aplicarVoz() })
-        voz.agregar(boton("PROBAR", false) { Voz.hablar("Buenas noches, ${Prefs.trato}. Así sueno ahora.") }, arriba = dp(10))
+        voz.addView(selectorVoz())
         voz.agregar(interruptor("Responder al activarme", "Decir «¿Sí, ${Prefs.trato}?» al escuchar «${Prefs.palabraActivacion}». Si lo apaga, solo sonará un tono.", Prefs.responderAlActivar) { Prefs.responderAlActivar = it }, arriba = dp(8))
 
         // ACTIVACIÓN
         val act = seccion("Activación por voz")
+        act.addView(texto("Tiempo de espera en conversación", 14f, Ui.TEXTO_SUAVE))
+        val esperas = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (seg in listOf(20, 30, 60)) esperas.addView(chip("$seg segundos", Prefs.esperaConversacion == seg) { Prefs.esperaConversacion = seg; dibujar() }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        act.agregar(esperas, arriba = dp(6))
         act.addView(interruptor("Conversación continua", "Después de responder sigo escuchándole, sin decir «${Prefs.palabraActivacion}». Para terminar diga «eso es todo», «gracias, es todo» o «adiós».", Prefs.conversacionContinua) { Prefs.conversacionContinua = it })
         act.addView(interruptor("Escuchar «${Prefs.palabraActivacion}»", "Funciona sin internet. Nada de lo que escucho sale de su celular.", Prefs.escuchaActiva) {
             Prefs.escuchaActiva = it

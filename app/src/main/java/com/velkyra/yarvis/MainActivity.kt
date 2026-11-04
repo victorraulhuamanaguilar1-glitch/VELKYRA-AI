@@ -170,21 +170,37 @@ class MainActivity : Base(), Yarvis.Observador {
             setColorFilter(Ui.FONDO)
             background = Ui.degradadoCian(this@MainActivity, 26f)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            setOnClickListener { if (entrada.text.isNotBlank()) enviar() else Yarvis.activar(false) }
+            setOnClickListener {
+                when {
+                    entrada.text.isNotBlank() -> enviar()
+                    Yarvis.estado != Yarvis.Estado.REPOSO -> Yarvis.cancelar()
+                    else -> Yarvis.activar(false)
+                }
+            }
         }
         barraEntrada.addView(botonAccion, LinearLayout.LayoutParams(dp(52), dp(52)).apply { marginStart = dp(10) })
-        entrada.addTextChangedListener(Cambio {
-            botonAccion.setImageResource(if (entrada.text.isNotBlank()) android.R.drawable.ic_menu_send else android.R.drawable.ic_btn_speak_now)
-        })
+        entrada.addTextChangedListener(Cambio { actualizarBoton() })
         col.agregar(barraEntrada, arriba = dp(8))
 
         capa.addView(col, FrameLayout.LayoutParams(-1, -1))
 
         // Marca de agua discreta
-        val agua = texto("VELKYRA", 11f, Ui.TEXTO, Ui.titulo, 0.6f).apply { alpha = 0.13f }
-        capa.addView(agua, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(388) })
+        val agua = texto("VELKYRA", 9f, Ui.TEXTO, Ui.titulo, 0.6f).apply { alpha = 0.16f }
+        capa.addView(agua, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply { bottomMargin = dp(1) })
 
         montar(capa)
+    }
+
+    /** Micrófono (en reposo), enviar (si hay texto) o detener (mientras habla o escucha). */
+    private fun actualizarBoton() {
+        if (!::botonAccion.isInitialized) return
+        botonAccion.setImageResource(
+            when {
+                entrada.text.isNotBlank() -> android.R.drawable.ic_menu_send
+                Yarvis.estado != Yarvis.Estado.REPOSO -> android.R.drawable.ic_media_pause
+                else -> android.R.drawable.ic_btn_speak_now
+            }
+        )
     }
 
     private fun enviar() {
@@ -203,7 +219,14 @@ class MainActivity : Base(), Yarvis.Observador {
             else Ui.panel(this@MainActivity, 16f, 0x1A2DE2FF, Ui.BORDE)
         }
         if (!m.deUsuario) caja.addView(texto("YARVIS", 10f, Ui.CIAN, Ui.titulo, 0.25f))
-        caja.addView(texto(m.texto, 16f, if (m.deUsuario) Ui.TEXTO else Ui.CIAN_CLARO).apply { setTextIsSelectable(true) })
+        caja.addView(texto(m.texto, 16f, if (m.deUsuario) Ui.TEXTO else Ui.CIAN_CLARO))
+        caja.setOnLongClickListener {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("YARVIS", m.texto))
+            android.widget.Toast.makeText(this, "Texto copiado", android.widget.Toast.LENGTH_SHORT).show()
+            true
+        }
+        if (!m.deUsuario) caja.setOnClickListener { Voz.detener(); Yarvis.cancelar(); Yarvis.anunciar(m.texto.substringBefore("\n["), guardar = false) }
         val lp = LinearLayout.LayoutParams(-2, -2).apply {
             topMargin = dp(8)
             gravity = if (m.deUsuario) Gravity.END else Gravity.START
@@ -245,6 +268,7 @@ class MainActivity : Base(), Yarvis.Observador {
     // --- Observador -------------------------------------------------------
     override fun alEstado(estado: Yarvis.Estado) {
         nucleo.estado = estado
+        actualizarBoton()
         if (estado == Yarvis.Estado.REPOSO) h.postDelayed({ if (Yarvis.estado == Yarvis.Estado.REPOSO) subtitulo.text = "Diga «${Prefs.palabraActivacion}» o toque el núcleo" }, 4000)
         refrescarDatos()
     }

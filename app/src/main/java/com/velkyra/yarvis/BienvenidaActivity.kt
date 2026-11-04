@@ -169,6 +169,7 @@ class BienvenidaActivity : Base() {
             agregar(campoOtro, arriba = dp(10))
             ejemplo = texto("", 16f, Ui.CIAN_CLARO)
             agregar(ejemplo, arriba = dp(18))
+            agregar(interruptor("Yo soy el creador de YARVIS", "Si me pregunta «¿quién te creó?», responderé que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(14))
             campoNombre.addTextChangedListener(Cambio { actualizarEjemplo() })
             campoOtro.addTextChangedListener(Cambio { actualizarEjemplo() })
             dibujarChips(); actualizarEjemplo()
@@ -190,51 +191,10 @@ class BienvenidaActivity : Base() {
     }
 
     // ------------------------------------------------------------------ 2
-    private fun pasoVoz(): View {
-        val muestra = { "Buenas noches, ${Prefs.trato}. Todos los sistemas en línea. Estoy a su disposición." }
-        return plantilla("Elija mi voz", "Toque una voz para escucharla. Le recomiendo una masculina y grave.", {
-            val lista = LinearLayout(this@BienvenidaActivity).apply { orientation = LinearLayout.VERTICAL }
-            addView(lista)
-            fun llenar() {
-                lista.removeAllViews()
-                val ops = Voz.opciones()
-                if (ops.isEmpty()) {
-                    lista.addView(texto("Cargando voces del celular…", 16f, Ui.TEXTO_SUAVE))
-                    lista.agregar(boton("INSTALAR VOCES DE GOOGLE", false) {
-                        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.tts"))) } catch (_: Exception) {}
-                    }, arriba = dp(12))
-                    h.postDelayed({ if (paso == 2) llenar() }, 1500)
-                    return
-                }
-                val actual = Prefs.voz.ifBlank { Voz.vozActual() }
-                for (o in ops.take(12)) {
-                    val sel = o.voz.name == actual
-                    val fila = LinearLayout(this@BienvenidaActivity).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER_VERTICAL
-                        background = Ui.panel(this@BienvenidaActivity, 14f, if (sel) 0x302DE2FF else Ui.PANEL, if (sel) Ui.CIAN else Ui.BORDE)
-                        setPadding(dp(16), dp(14), dp(16), dp(14))
-                    }
-                    fila.agregar(texto(o.etiqueta, 17f, if (sel) Ui.CIAN_CLARO else Ui.TEXTO, Ui.fuerte), ancho = 0, peso = 1f)
-                    fila.addView(texto(if (sel) "✓" else "▶", 18f, Ui.CIAN, Ui.fuerte))
-                    fila.setOnClickListener {
-                        Prefs.voz = o.voz.name
-                        Voz.probarVoz(o.voz, muestra())
-                        llenar()
-                    }
-                    lista.agregar(fila, arriba = dp(8))
-                }
-            }
-            llenar()
-            espacio(20)
-            addView(etiqueta("Tono (más grave ← → más agudo)"))
-            agregar(deslizador(80, ((Prefs.tono - 0.5f) * 100).toInt()) { Prefs.tono = 0.5f + it / 100f; Voz.aplicarVoz() }, arriba = dp(6))
-            espacio(12)
-            addView(etiqueta("Velocidad"))
-            agregar(deslizador(60, ((Prefs.velocidad - 0.7f) * 100).toInt()) { Prefs.velocidad = 0.7f + it / 100f; Voz.aplicarVoz() }, arriba = dp(6))
-            agregar(boton("ESCUCHAR", false) { Voz.aplicarVoz(); Voz.hablar(muestra()) }, arriba = dp(16))
-        }, "CONTINUAR", { Voz.aplicarVoz(); mostrar(3) }, "ATRÁS", { mostrar(1) })
-    }
+    private fun pasoVoz(): View =
+        plantilla("Elija mi voz", "Voces neuronales de narrador que funcionan dentro de su celular, sin internet. Toque una para escucharla.", {
+            addView(selectorVoz())
+        }, "CONTINUAR", { mostrar(3) }, "ATRÁS", { mostrar(1) })
 
     // ------------------------------------------------------------------ 3
     private fun pasoIA(): View {

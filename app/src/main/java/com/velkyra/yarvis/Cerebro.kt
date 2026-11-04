@@ -142,6 +142,33 @@ class Cerebro(private val ctx: Context) {
                 "y responder cualquier pregunta. Le abrí la lista completa de órdenes, $tr.")
         }
 
+        // --- Voz de YARVIS -----------------------------------------------------
+        if (f.tiene("^(repite|repitelo|repitemelo|que dijiste|otra vez|puedes repetir|repite eso|no te entendi)")) {
+            val u = Yarvis.ultimaRespuesta
+            return if (u.isBlank()) R("Aún no le he dicho nada que repetir, $tr.") else R(u)
+        }
+        if (f.tiene("(habla|hablas|ve|lee|narra)( un poco| mas)? (mas )?(despacio|lento)|mas despacio|mas lento")) {
+            Prefs.velocidad = (Prefs.velocidad - 0.12f).coerceAtLeast(0.7f); Voz.aplicarVoz()
+            return R("Entendido, $tr. Hablaré más despacio.")
+        }
+        if (f.tiene("(habla|hablas|ve|lee|narra)( un poco)? (mas )?(rapido|deprisa)|mas rapido")) {
+            Prefs.velocidad = (Prefs.velocidad + 0.12f).coerceAtMost(1.3f); Voz.aplicarVoz()
+            return R("Entendido, $tr. Hablaré más rápido.")
+        }
+        if (f.tiene("(cambia|cambiar|usa|pon) (de |tu |la )?voz")) {
+            val espana = f.tiene("(espana|espanol|castellano|europe)")
+            val latino = f.tiene("(latin|mexic|peru|america)")
+            val siguiente = when {
+                espana -> "es_ES-davefx"
+                latino -> "es_MX-ald"
+                else -> VozNeural.NARRADORES.map { it.id }.firstOrNull { it != Prefs.vozNeural } ?: "es_MX-ald"
+            }
+            val nombre = VozNeural.NARRADORES.first { it.id == siguiente }.nombre
+            return R("Cambiando a la voz de $nombre, $tr.", cerrar = true) {
+                Voz.cambiarNarrador(siguiente) { ok -> if (ok) Yarvis.anunciar("¿Qué le parece esta voz, $tr?") }
+            }
+        }
+
         // --- Conversación ----------------------------------------------------
         if (f.tiene("^(hola|hey|oye|buenas|buenos dias|buenas tardes|buenas noches|que tal|saludos)( yarvis)?$")) {
             return R("${saludo()}, $tr. ¿En qué puedo ayudarle?", seguir = true)
@@ -149,8 +176,15 @@ class Cerebro(private val ctx: Context) {
         if (f.tiene("(quien eres|como te llamas|cual es tu nombre|presentate|que eres)")) {
             return R("Soy YARVIS, su asistente personal, desarrollado por VELKYRA. Estoy a su servicio las veinticuatro horas, $tr.")
         }
-        if (f.tiene("(quien te (creo|hizo|desarrollo|programo)|quien es tu creador)")) {
-            return R("Fui desarrollado por VELKYRA, $tr. Para soporte puede escribir a velkyra3 arroba gmail punto com.")
+        if (f.tiene("(quien te (creo|hizo|desarrollo|programo|diseno|invento|fabrico)|quien es tu (creador|dueno|jefe|amo|programador|padre)|quien te dio vida|de quien eres|a quien perteneces|quien te construyo)")) {
+            return if (Prefs.soyCreador) {
+                val n = Prefs.nombre.ifBlank { "usted" }
+                R(listOf(
+                    "Usted me creó, $tr. Soy su creación, diseñada y programada por usted bajo su compañía VELKYRA. Y es un honor servirle.",
+                    "Fue usted, $tr. ${if (n != "usted") "$n, " else ""}mi creador. Me dio vida a través de VELKYRA, y existo para ayudarle.",
+                    "Mi creador es usted, $tr. Cada línea de mi código lleva su firma, a través de VELKYRA."
+                ).random())
+            } else R("Fui desarrollado por VELKYRA, $tr. Para soporte puede escribir a velkyra3 arroba gmail punto com.")
         }
         if (f.tiene("(como estas|como te encuentras|como te va|todo bien)")) {
             return R("Todos mis sistemas funcionan al cien por ciento, $tr. Gracias por preguntar.")

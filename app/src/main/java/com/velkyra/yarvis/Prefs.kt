@@ -59,6 +59,30 @@ object Prefs {
         get() = f("velocidad", 0.97f)
         set(v) = pf("velocidad", v)
 
+    /** Voz neuronal de narrador elegida (ver VozNeural.NARRADORES). */
+    var vozNeural: String
+        get() = s("voz_neural", "es_MX-ald")
+        set(v) = ps("voz_neural", v)
+
+    /** Usar la voz neuronal propia (si es false, se usan las voces de Google del celular). */
+    var usarVozNeural: Boolean
+        get() = b("usar_voz_neural", true)
+        set(v) = pb("usar_voz_neural", v)
+
+    var tonoNeural: Float
+        get() = f("tono_neural", 0.96f)
+        set(v) = pf("tono_neural", v)
+
+    /** El usuario es el creador de YARVIS (así responde «usted me creó»). */
+    var soyCreador: Boolean
+        get() = b("soy_creador", false)
+        set(v) = pb("soy_creador", v)
+
+    /** Segundos que espera en silencio antes de cerrar la conversación. */
+    var esperaConversacion: Int
+        get() = sp.getInt("espera_conversacion", 30)
+        set(v) = sp.edit().putInt("espera_conversacion", v).apply()
+
     var responderAlActivar: Boolean
         get() = b("responder_activar", true)
         set(v) = pb("responder_activar", v)

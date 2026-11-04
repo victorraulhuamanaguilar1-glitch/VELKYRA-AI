@@ -40,6 +40,16 @@ object Voz : TextToSpeech.OnInitListener {
         ctx = c.applicationContext
         audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         tts = TextToSpeech(ctx, this, "com.google.android.tts")
+        if (Prefs.usarVozNeural) VozNeural.preparar(ctx)
+    }
+
+    /** ¿Está hablando con la voz neuronal propia? */
+    val usandoNeural get() = Prefs.usarVozNeural && VozNeural.lista
+
+    fun cambiarNarrador(id: String, alListo: ((Boolean) -> Unit)? = null) {
+        Prefs.vozNeural = id
+        Prefs.usarVozNeural = true
+        VozNeural.preparar(ctx) { ok -> alListo?.invoke(ok) }
     }
 
     override fun onInit(status: Int) {
@@ -98,6 +108,7 @@ object Voz : TextToSpeech.OnInitListener {
         val voces = try { tts?.voices } catch (_: Exception) { null } ?: return emptyList()
         val es = voces.filter { it.locale.language == "es" }
             .filter { !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .filter { !it.isNetworkConnectionRequired }
         val regiones = mapOf(
             "US" to "Latinoamérica", "MX" to "México", "ES" to "España", "PE" to "Perú",
             "AR" to "Argentina", "CO" to "Colombia", "CL" to "Chile", "419" to "Latinoamérica"
@@ -148,6 +159,22 @@ object Voz : TextToSpeech.OnInitListener {
     }
 
     fun hablar(texto: String, despues: (() -> Unit)? = null) {
+        // 1) Voz neuronal de narrador (dentro del celular, siempre la misma voz)
+        if (usandoNeural) {
+            alTerminar.clear()
+            tts?.stop()
+            pedirFoco()
+            val ok = VozNeural.hablar(limpiar(texto),
+                alEmpezar = { hablando = true; alCambiar?.invoke(true) },
+                alTerminar = {
+                    hablando = false
+                    alCambiar?.invoke(false)
+                    soltarFoco()
+                    despues?.invoke()
+                })
+            if (ok) return
+        }
+        // 2) Respaldo: voces de Google del celular
         val motor = tts
         if (!lista || motor == null) {
             pendientes.add(texto to despues)
@@ -183,6 +210,7 @@ object Voz : TextToSpeech.OnInitListener {
     }
 
     fun detener() {
+        VozNeural.detener()
         alTerminar.clear()
         tts?.stop()
         hablando = false
