@@ -192,7 +192,7 @@ class BienvenidaActivity : Base() {
 
     // ------------------------------------------------------------------ 2
     private fun pasoVoz(): View =
-        plantilla("Elija mi voz", "Voces neuronales de narrador que funcionan dentro de su celular, sin internet. Toque una para escucharla.", {
+        plantilla("Elija mi voz", "Voces premium muy humanas (con internet) o las voces de su celular (sin límite). Toque una para escucharla.", {
             addView(selectorVoz())
         }, "CONTINUAR", { mostrar(3) }, "ATRÁS", { mostrar(1) })
 

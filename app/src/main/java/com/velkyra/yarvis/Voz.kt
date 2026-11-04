@@ -40,26 +40,15 @@ object Voz : TextToSpeech.OnInitListener {
         ctx = c.applicationContext
         audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         tts = TextToSpeech(ctx, this, "com.google.android.tts")
-        if (Prefs.usarVozNeural) VozNeural.preparar(ctx)
-
     }
 
     /** Elige una voz de Google del celular. */
     fun usarVozGoogle(v: Voice) {
         Prefs.usarVozNeural = false
         Prefs.voz = v.name
-        VozNeural.detener()
         aplicarVoz()
     }
 
-    /** ¿Está hablando con la voz neuronal propia? */
-    val usandoNeural get() = Prefs.usarVozNeural && VozNeural.lista
-
-    fun cambiarNarrador(id: String, alListo: ((Boolean) -> Unit)? = null) {
-        Prefs.vozNeural = id
-        Prefs.usarVozNeural = true
-        VozNeural.preparar(ctx) { ok -> alListo?.invoke(ok) }
-    }
 
     override fun onInit(status: Int) {
         val motor = tts ?: return
@@ -166,23 +155,43 @@ object Voz : TextToSpeech.OnInitListener {
         hablar(texto)
     }
 
+    /** ¿Se usará la voz premium para este texto? */
+    private fun usarPremium(texto: String) =
+        VozPremium.disponible() && (Prefs.premiumModo == "todo" || texto.length > 220)
+
     fun hablar(texto: String, despues: (() -> Unit)? = null) {
-        // 1) Voz neuronal de narrador (dentro del celular, siempre la misma voz)
-        if (usandoNeural) {
+        val limpio = limpiar(texto)
+        // 1) Voz premium de Gemini (muy humana, con internet)
+        if (usarPremium(limpio)) {
             alTerminar.clear()
             tts?.stop()
             pedirFoco()
-            val ok = VozNeural.hablar(limpiar(texto),
+            VozPremium.hablar(limpio, Prefs.vozPremium,
                 alEmpezar = { hablando = true; alCambiar?.invoke(true) },
                 alTerminar = {
                     hablando = false
                     alCambiar?.invoke(false)
                     soltarFoco()
                     despues?.invoke()
-                })
-            if (ok) return
+                },
+                alFallar = { restante -> hablarCelular(restante, despues) })
+            return
         }
-        // 2) Respaldo: voces de Google del celular
+        // 2) Voz del celular (Google)
+        hablarCelular(texto, despues)
+    }
+
+    /** Habla con una voz premium concreta (para probarla en ajustes). */
+    fun probarPremium(vozId: String, texto: String) {
+        detener()
+        pedirFoco()
+        VozPremium.hablar(limpiar(texto), vozId,
+            alEmpezar = { hablando = true; alCambiar?.invoke(true) },
+            alTerminar = { hablando = false; alCambiar?.invoke(false); soltarFoco() },
+            alFallar = { restante -> hablarCelular(restante, null) })
+    }
+
+    private fun hablarCelular(texto: String, despues: (() -> Unit)?) {
         val motor = tts
         if (!lista || motor == null) {
             pendientes.add(texto to despues)
@@ -219,7 +228,7 @@ object Voz : TextToSpeech.OnInitListener {
     }
 
     fun detener() {
-        VozNeural.detener()
+        VozPremium.detener()
         alTerminar.clear()
         tts?.stop()
         hablando = false

@@ -155,18 +155,17 @@ class Cerebro(private val ctx: Context) {
             Prefs.velocidad = (Prefs.velocidad + 0.12f).coerceAtMost(1.3f); Voz.aplicarVoz()
             return R("Entendido, $tr. Hablaré más rápido.")
         }
-        if (f.tiene("(cambia|cambiar|usa|pon) (de |tu |la )?voz")) {
-            val espana = f.tiene("(espana|espanol|castellano|europe)")
-            val latino = f.tiene("(latin|mexic|peru|america)")
-            val siguiente = when {
-                espana -> "es_ES-davefx"
-                latino -> "es_MX-ald"
-                else -> VozNeural.NARRADORES.map { it.id }.firstOrNull { it != Prefs.vozNeural } ?: "es_MX-ald"
+        if (f.tiene("(cambia|cambiar|usa|pon|quiero) (de |tu |la |una |otra )?voz")) {
+            val mujer = f.tiene("(mujer|femenina|chica|dama)")
+            val hombre = f.tiene("(hombre|masculina|varon|chico|caballero)")
+            if ((mujer || hombre) && Prefs.claveIA.isNotBlank()) {
+                val opciones = VozPremium.VOCES.filter { it.hombre == hombre }
+                val sig = opciones.getOrNull((opciones.indexOfFirst { it.id == Prefs.vozPremium } + 1) % opciones.size) ?: opciones[0]
+                Prefs.vozPremium = sig.id
+                return R("Desde ahora hablaré con la voz de ${sig.nombre}, $tr. ¿Qué le parece?", seguir = true)
             }
-            val nombre = VozNeural.NARRADORES.first { it.id == siguiente }.nombre
-            return R("Cambiando a la voz de $nombre, $tr.", cerrar = true) {
-                Voz.cambiarNarrador(siguiente) { ok -> if (ok) Yarvis.anunciar("¿Qué le parece esta voz, $tr?") }
-            }
+            lanzar(Intent(ctx, AjustesActivity::class.java))
+            return R("Le abrí la lista de voces, $tr. Toque una para escucharla.", cerrar = true)
         }
 
         // --- Conversación ----------------------------------------------------

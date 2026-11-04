@@ -59,7 +59,17 @@ object Prefs {
         get() = f("velocidad", 0.97f)
         set(v) = pf("velocidad", v)
 
-    /** Voz neuronal de narrador elegida (ver VozNeural.NARRADORES). */
+    /** Voz premium de Gemini elegida ("" = apagada). */
+    var vozPremium: String
+        get() = s("voz_premium", "")
+        set(v) = ps("voz_premium", v)
+
+    /** "todo" = premium para todas las respuestas; "largas" = solo cuentos y respuestas largas. */
+    var premiumModo: String
+        get() = s("premium_modo", "todo")
+        set(v) = ps("premium_modo", v)
+
+    /** Voz neuronal de narrador elegida (ya no se usa). */
     var vozNeural: String
         get() = s("voz_neural", "es_MX-ald")
         set(v) = ps("voz_neural", v)

@@ -40,45 +40,6 @@ jobs:
           cp -r modelo-es app/src/main/assets/modelo-es
           echo "0.42" > app/src/main/assets/modelo-es/VERSION
 
-      - name: Voz neuronal (motor y narradores)
-        id: cache-voces
-        uses: actions/cache@v4
-        with:
-          path: voces-cache
-          key: sherpa-1.12.40-voces-6-v2
-
-      - name: Descargar voz neuronal
-        if: steps.cache-voces.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          mkdir -p voces-cache && cd voces-cache
-          curl -sSL -o sherpa.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.40/sherpa-onnx-v1.12.40-android.tar.bz2
-          tar xjf sherpa.tar.bz2 && rm sherpa.tar.bz2
-          for v in es_MX-ald-medium es_ES-davefx-medium es_ES-sharvard-medium es_MX-claude-high es_AR-daniela-high; do
-            curl -sSL -o v.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-$v.tar.bz2
-            tar xjf v.tar.bz2 && rm v.tar.bz2
-          done
-          ls -la
-
-      - name: Copiar voz neuronal a la app
-        run: |
-          set -e
-          for abi in arm64-v8a armeabi-v7a; do
-            mkdir -p app/src/main/jniLibs/$abi
-            cp voces-cache/jniLibs/$abi/libsherpa-onnx-jni.so voces-cache/jniLibs/$abi/libonnxruntime.so app/src/main/jniLibs/$abi/
-          done
-          V=app/src/main/assets/voces
-          rm -rf $V && mkdir -p $V
-          cp -r voces-cache/vits-piper-es_MX-ald-medium/espeak-ng-data $V/espeak-ng-data
-          for full in es_MX-ald-medium es_ES-davefx-medium es_ES-sharvard-medium es_MX-claude-high es_AR-daniela-high; do
-            v=${full%-*}
-            mkdir -p $V/$v
-            cp voces-cache/vits-piper-$full/$full.onnx $V/$v/model.onnx
-            cp voces-cache/vits-piper-$full/tokens.txt $V/$v/tokens.txt
-          done
-          echo "2" > $V/VERSION
-          du -sh $V app/src/main/jniLibs
-
       - name: Compilar APK
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
