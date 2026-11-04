@@ -84,8 +84,22 @@ object Prefs {
     val claveIA: String
         get() = claveIAPropia.ifBlank { BuildConfig.GEMINI_KEY }
 
+    var claveGroqPropia: String
+        get() = s("clave_groq", "")
+        set(v) = ps("clave_groq", v.trim())
+
+    val claveGroq: String
+        get() = claveGroqPropia.ifBlank { BuildConfig.GROQ_KEY }
+
+    var claveCerebrasPropia: String
+        get() = s("clave_cerebras", "")
+        set(v) = ps("clave_cerebras", v.trim())
+
+    val claveCerebras: String
+        get() = claveCerebrasPropia.ifBlank { BuildConfig.CEREBRAS_KEY }
+
     val claveIncluida: Boolean
-        get() = BuildConfig.GEMINI_KEY.isNotBlank()
+        get() = BuildConfig.GEMINI_KEY.isNotBlank() || BuildConfig.GROQ_KEY.isNotBlank() || BuildConfig.CEREBRAS_KEY.isNotBlank()
 
     var modeloIA: String
         get() = s("modelo_ia", MODELO_IA).ifBlank { MODELO_IA }

@@ -153,15 +153,33 @@ object Voz : TextToSpeech.OnInitListener {
             pendientes.add(texto to despues)
             return
         }
-        val id = "y" + contador.incrementAndGet()
-        if (despues != null) alTerminar[id] = despues
+        // Los textos largos (cuentos) se dividen en partes para que el motor de voz no los corte
+        val partes = dividir(limpiar(texto), 1500)
         pedirFoco()
-        val r = motor.speak(limpiar(texto), TextToSpeech.QUEUE_FLUSH, null, id)
-        if (r != TextToSpeech.SUCCESS) {
-            alTerminar.remove(id)
+        var ok = true
+        partes.forEachIndexed { i, parte ->
+            val id = "y" + contador.incrementAndGet()
+            if (i == partes.lastIndex && despues != null) alTerminar[id] = despues
+            val modo = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            if (motor.speak(parte, modo, null, id) != TextToSpeech.SUCCESS) ok = false
+        }
+        if (!ok || partes.isEmpty()) {
+            alTerminar.clear()
             soltarFoco()
             despues?.let { principal.post(it) }
         }
+    }
+
+    private fun dividir(t: String, max: Int): List<String> {
+        if (t.length <= max) return listOf(t)
+        val r = mutableListOf<String>()
+        val sb = StringBuilder()
+        for (oracion in Regex("(?<=[.!?…])\\s+").split(t)) {
+            if (sb.length + oracion.length + 1 > max && sb.isNotEmpty()) { r.add(sb.toString()); sb.clear() }
+            if (oracion.length > max) { oracion.chunked(max).forEach { r.add(it) } } else { if (sb.isNotEmpty()) sb.append(' '); sb.append(oracion) }
+        }
+        if (sb.isNotEmpty()) r.add(sb.toString())
+        return r
     }
 
     fun detener() {

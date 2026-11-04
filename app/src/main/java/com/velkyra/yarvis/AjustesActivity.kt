@@ -105,28 +105,30 @@ class AjustesActivity : Base() {
 
         // IA
         val ia = seccion("Inteligencia artificial")
-        val estadoIA = when {
-            Prefs.claveIAPropia.isNotBlank() -> "Activada con su propia clave"
-            Prefs.claveIncluida -> "Activada (clave incluida)"
-            else -> "Sin activar"
+        ia.addView(texto("Tengo varios cerebros gratuitos que se turnan: si uno agota su cupo, sigo con el siguiente.", 15f, Ui.TEXTO))
+        for ((nombre, ok) in CerebroIA.estado()) {
+            ia.agregar(texto((if (ok) "●  " else "○  ") + nombre + if (ok) "  · activo" else "  · sin clave", 16f, if (ok) Ui.VERDE else Ui.TEXTO_SUAVE, Ui.fuerte), arriba = dp(6))
         }
-        ia.addView(texto("●  $estadoIA", 16f, if (Prefs.claveIA.isNotBlank()) Ui.VERDE else Ui.AMBAR, Ui.fuerte))
-        ia.agregar(texto("Su clave de Google Gemini (opcional)", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
-        val cClave = campo("AIza…", Prefs.claveIAPropia, clave = true)
-        ia.agregar(cClave, arriba = dp(4))
-        ia.agregar(texto("Modelo", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
-        val cModelo = campo(Prefs.MODELO_IA, Prefs.modeloIA)
-        ia.agregar(cModelo, arriba = dp(4))
+        if (CerebroIA.ultimoProveedor.isNotBlank()) ia.agregar(texto("Última respuesta: ${CerebroIA.ultimoProveedor}", 13f, Ui.TEXTO_SUAVE), arriba = dp(6))
+        ia.agregar(texto("Claves propias (opcional, reemplazan a las incluidas)", 14f, Ui.TEXTO_SUAVE), arriba = dp(14))
+        val cGroq = campo("Groq · gsk_…", Prefs.claveGroqPropia, clave = true)
+        ia.agregar(cGroq, arriba = dp(6))
+        val cCere = campo("Cerebras · csk-…", Prefs.claveCerebrasPropia, clave = true)
+        ia.agregar(cCere, arriba = dp(6))
+        val cClave = campo("Google Gemini · AIza…", Prefs.claveIAPropia, clave = true)
+        ia.agregar(cClave, arriba = dp(6))
         val filaIA = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         filaIA.agregar(boton("GUARDAR", false) {
+            Prefs.claveGroqPropia = cGroq.text.toString()
+            Prefs.claveCerebrasPropia = cCere.text.toString()
             Prefs.claveIAPropia = cClave.text.toString()
-            Prefs.modeloIA = cModelo.text.toString()
             dibujar()
         }, ancho = 0, peso = 1f)
         filaIA.addView(android.view.View(this), LinearLayout.LayoutParams(dp(10), 1))
         filaIA.agregar(boton("PROBAR", false) {
+            Prefs.claveGroqPropia = cGroq.text.toString()
+            Prefs.claveCerebrasPropia = cCere.text.toString()
             Prefs.claveIAPropia = cClave.text.toString()
-            Prefs.modeloIA = cModelo.text.toString()
             Yarvis.procesar("Preséntate en una sola oración.")
             finish()
         }, ancho = 0, peso = 1f)

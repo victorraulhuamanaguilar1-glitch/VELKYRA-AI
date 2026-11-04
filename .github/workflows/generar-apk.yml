@@ -43,6 +43,8 @@ jobs:
       - name: Compilar APK
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: |
           set -o pipefail
           chmod +x gradlew
@@ -65,8 +67,10 @@ jobs:
         if: always()
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: |
-          if [ -n "$GEMINI_API_KEY" ]; then echo "si" > /tmp/ia.txt; else echo "no" > /tmp/ia.txt; fi
+          echo "gemini=$([ -n "$GEMINI_API_KEY" ] && echo si || echo no) groq=$([ -n "$GROQ_API_KEY" ] && echo si || echo no) cerebras=$([ -n "$CEREBRAS_API_KEY" ] && echo si || echo no)" > /tmp/ia.txt
           mkdir -p /tmp/reg && cp build.log /tmp/reg/ 2>/dev/null || true
           ls -R modelo-es > /tmp/reg/modelo.txt 2>/dev/null || true
           find modelo-es -name "words.txt" -exec grep -iE "^(yar|jar|llar|har|gar|yab|jab)[a-z]*" {} \; >> /tmp/reg/modelo.txt 2>/dev/null || true

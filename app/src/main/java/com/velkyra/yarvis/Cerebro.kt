@@ -322,6 +322,21 @@ class Cerebro(private val ctx: Context) {
             }
         }
 
+        // --- Noticias ------------------------------------------------------------
+        if (f.tiene("(noticias|titulares|que hay de nuevo|que paso hoy en|novedades de|que se sabe de)") && !f.tiene("(mis mensajes|notificaciones)")) {
+            val tema = Regex("(?:noticias|titulares|novedades|que hay de nuevo|que paso hoy|que se sabe)\\s+(?:de|del|sobre|en|acerca de)\\s+(?:la |el |los |las )?(.+)$").find(t)
+                ?.let { f.originalDeGrupo(it, 1) }
+                ?.takeIf { !Regex("^(hoy|ahora|del dia|de hoy|ultima hora)$").containsMatchIn(Frase.normalizar(it)) }
+            return fondo(cb) {
+                val inf = Noticias.informe(tema)
+                CerebroIA.recordar(f.original, inf)
+                R(inf, seguir = true)
+            }
+        }
+
+        // --- Información del teléfono -------------------------------------------
+        InfoTelefono.responder(ctx, f)?.let { return R(it) }
+
         // --- Linterna, batería, volumen, brillo, sonido ----------------------
         if (f.tiene("(linterna|flash)") || f.tiene("(prende|enciende|apaga) (la )?luz")) {
             val on = !f.tiene("(apaga|desactiva|quita)")

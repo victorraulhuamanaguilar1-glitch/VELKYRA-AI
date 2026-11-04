@@ -19,6 +19,8 @@ android {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
         buildConfigField("String", "GEMINI_KEY", "\"" + (System.getenv("GEMINI_API_KEY") ?: "").trim() + "\"")
+        buildConfigField("String", "GROQ_KEY", "\"" + (System.getenv("GROQ_API_KEY") ?: "").trim() + "\"")
+        buildConfigField("String", "CEREBRAS_KEY", "\"" + (System.getenv("CEREBRAS_API_KEY") ?: "").trim() + "\"")
     }
 
     signingConfigs {
