@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -15,8 +18,19 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
       - name: Compilar APK
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk VELKYRA-AI.apk
       - uses: actions/upload-artifact@v4
         with:
           name: VELKYRA-AI-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: VELKYRA-AI.apk
+      - name: Publicar en Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: VELKYRA AI v1.0.${{ github.run_number }}
+          body: Descarga **VELKYRA-AI.apk** e instálalo en tu celular Android (8.0 o superior).
+          files: VELKYRA-AI.apk
+          make_latest: true
