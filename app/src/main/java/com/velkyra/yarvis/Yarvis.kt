@@ -18,7 +18,13 @@ object Yarvis {
     data class Mensaje(val deUsuario: Boolean, val texto: String)
 
     /** Respuesta del cerebro. [seguir] = vuelve a escuchar después de hablar (conversación). */
-    data class Respuesta(val texto: String, val seguir: Boolean = false, val despues: (() -> Unit)? = null)
+    data class Respuesta(
+        val texto: String,
+        val seguir: Boolean = false,
+        val despues: (() -> Unit)? = null,
+        /** Termina la conversación aunque esté activo el modo continuo (despedidas, apps abiertas…). */
+        val cerrar: Boolean = false
+    )
 
     interface Observador {
         fun alEstado(estado: Estado) {}
@@ -43,6 +49,9 @@ object Yarvis {
     var pantallaVisible = false
 
     private var sesion = 0
+    private var silencios = 0
+    private var enConversacion = false
+    private var turnoPorVoz = false
     private var tono: ToneGenerator? = null
 
     private val frasesActivacion = listOf("¿Sí, %s?", "Dígame, %s.", "A sus órdenes, %s.", "Le escucho, %s.", "¿En qué le ayudo, %s?")
@@ -75,6 +84,8 @@ object Yarvis {
     /** Despierta a YARVIS (por la palabra "Yarvis", al tocar el núcleo o desde la notificación). */
     fun activar(porPalabra: Boolean) = principal.post {
         val miSesion = ++sesion
+        silencios = 0
+        enConversacion = false
         Oido.cancelar()
         Voz.detener()
         ServicioEscucha.pausar()
@@ -92,7 +103,7 @@ object Yarvis {
 
     private fun escucharOrden(miSesion: Int) {
         cambiar(Estado.ESCUCHANDO)
-        for (o in observadores) o.alParcial("Escuchando…")
+        for (o in observadores) o.alParcial(if (enConversacion) "Le escucho… (diga «eso es todo» para terminar)" else "Escuchando…")
         Oido.escuchar(ctx, object : Oido.Escucha {
             override fun parcial(texto: String) {
                 if (miSesion == sesion) for (o in observadores) o.alParcial(texto)
@@ -105,9 +116,17 @@ object Yarvis {
             override fun resultado(texto: String?) {
                 if (miSesion != sesion) return
                 if (texto.isNullOrBlank()) {
-                    for (o in observadores) o.alParcial("No le escuché. Toque el núcleo o diga «Yarvis».")
-                    terminar()
+                    if (enConversacion && silencios < 2) {
+                        // En conversación: espera un poco más antes de cerrar
+                        silencios++
+                        escucharOrden(miSesion)
+                    } else {
+                        for (o in observadores) o.alParcial(if (enConversacion) "Conversación terminada. Diga «Yarvis» cuando me necesite." else "No le escuché. Toque el núcleo o diga «Yarvis».")
+                        enConversacion = false
+                        terminar()
+                    }
                 } else {
+                    silencios = 0
                     procesar(texto, miSesion)
                 }
             }
@@ -122,7 +141,9 @@ object Yarvis {
     /** Procesa una orden escrita o hablada. */
     fun procesar(texto: String, sesionDada: Int = -1) = principal.post {
         val miSesion = if (sesionDada >= 0) sesionDada else ++sesion
+        turnoPorVoz = sesionDada >= 0
         if (sesionDada < 0) {
+            enConversacion = false
             Oido.cancelar()
             Voz.detener()
             ServicioEscucha.pausar()
@@ -137,10 +158,18 @@ object Yarvis {
         agregar(Mensaje(false, r.texto))
         cambiar(Estado.HABLANDO)
         for (o in observadores) o.alParcial(r.texto)
+        val abrioApp = cerebro.tomarAbrioApp()
+        val continuar = r.seguir || (Prefs.conversacionContinua && turnoPorVoz && !r.cerrar && !abrioApp && r.despues == null)
         Voz.hablar(r.texto) {
             if (miSesion != sesion) return@hablar
             r.despues?.invoke()
-            if (r.seguir) escucharOrden(miSesion) else terminar()
+            if (continuar) {
+                if (!r.seguir) enConversacion = true
+                escucharOrden(miSesion)
+            } else {
+                enConversacion = false
+                terminar()
+            }
         }
     }
 

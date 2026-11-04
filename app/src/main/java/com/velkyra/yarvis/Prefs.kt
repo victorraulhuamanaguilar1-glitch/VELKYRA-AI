@@ -63,6 +63,11 @@ object Prefs {
         get() = b("responder_activar", true)
         set(v) = pb("responder_activar", v)
 
+    /** Después de responder, sigue escuchando hasta que el usuario diga «eso es todo». */
+    var conversacionContinua: Boolean
+        get() = b("conversacion_continua", true)
+        set(v) = pb("conversacion_continua", v)
+
     var escuchaActiva: Boolean
         get() = b("escucha_activa", true)
         set(v) = pb("escucha_activa", v)

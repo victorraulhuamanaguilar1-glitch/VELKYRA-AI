@@ -73,6 +73,7 @@ class AjustesActivity : Base() {
 
         // ACTIVACIÓN
         val act = seccion("Activación por voz")
+        act.addView(interruptor("Conversación continua", "Después de responder sigo escuchándole, sin decir «Yarvis». Para terminar diga «eso es todo», «gracias, es todo» o «adiós».", Prefs.conversacionContinua) { Prefs.conversacionContinua = it })
         act.addView(interruptor("Escuchar «Yarvis»", "Funciona sin internet. Nada de lo que escucho sale de su celular.", Prefs.escuchaActiva) {
             Prefs.escuchaActiva = it
             if (it) ServicioEscucha.iniciar(this) else ServicioEscucha.actualizar(this)

@@ -41,7 +41,12 @@ class Cerebro(private val ctx: Context) {
     private val tr get() = Prefs.trato
 
     private val ASYNC = Yarvis.Respuesta("\u0000")
-    private fun R(t: String, seguir: Boolean = false, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues)
+    private fun R(t: String, seguir: Boolean = false, cerrar: Boolean = false, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues, cerrar)
+
+    // ¿La última orden abrió otra app? (entonces no se sigue escuchando)
+    @Volatile
+    private var abrioApp = false
+    fun tomarAbrioApp(): Boolean { val v = abrioApp; abrioApp = false; return v }
 
     fun olvidarConversacion() = CerebroIA.olvidar()
 
@@ -104,7 +109,7 @@ class Cerebro(private val ctx: Context) {
         pendiente?.let { p ->
             pendiente = null
             if (System.currentTimeMillis() < pendienteHasta) {
-                if (f.tiene("^(cancela|cancelar|olvidalo|nada|no|ninguno|dejalo)$")) return R("Cancelado, $tr.")
+                if (f.tiene("^(cancela|cancelar|olvidalo|nada|no|ninguno|dejalo)$")) return R("Cancelado, $tr.", cerrar = true)
                 p(f)?.let { return it }
             }
         }
@@ -121,10 +126,11 @@ class Cerebro(private val ctx: Context) {
             return R("Escucha activada, $tr. Diga «Yarvis» cuando me necesite.")
         }
         if (f.tiene("^(cancela|cancelar|olvidalo|olvida eso|nada|no nada|ninguna|dejalo|no importa)$")) {
-            return R("Como desee, $tr.")
+            return R("Como desee, $tr.", cerrar = true)
         }
-        if (f.tiene("^(adios|hasta luego|hasta manana|chau|chao|nos vemos|eso es todo|nada mas|es todo|descansa|apagate|buenas noches yarvis)\\b")) {
-            return R(listOf("A su servicio, $tr.", "Estaré aquí cuando me necesite, $tr.", "Que tenga un excelente día, $tr.").random())
+        if (f.tiene("^(adios|hasta luego|hasta manana|chau|chao|nos vemos|eso es todo|eso seria todo|nada mas|es todo|descansa|apagate|termina|terminar|terminamos|cierra la conversacion|fin de la conversacion|ya esta|listo eso es todo|puedes retirarte|retirate|ya no|ya no necesito nada|buenas noches yarvis)\\b") ||
+            f.tiene("(eso es todo|eso seria todo|nada mas|es todo|ya no necesito nada|termina la conversacion|cierra la conversacion)$")) {
+            return R(listOf("A su servicio, $tr.", "Estaré aquí cuando me necesite, $tr.", "Que tenga un excelente día, $tr.").random(), cerrar = true)
         }
         if (f.tiene("(que puedes hacer|que sabes hacer|^ayuda$|que comandos|lista de comandos|como te uso|para que sirves)")) {
             lanzar(Intent(ctx, ComandosActivity::class.java))
@@ -147,7 +153,7 @@ class Cerebro(private val ctx: Context) {
             return R("Todos mis sistemas funcionan al cien por ciento, $tr. Gracias por preguntar.")
         }
         if (f.tiene("^(gracias|muchas gracias|excelente|buen trabajo|perfecto|genial|te pasaste)")) {
-            return R(listOf("Para eso estoy, $tr.", "Siempre a su servicio, $tr.", "Es un placer, $tr.").random())
+            return R(listOf("Para eso estoy, $tr. ¿Algo más?", "Siempre a su servicio, $tr. ¿Necesita algo más?", "Es un placer, $tr. ¿Le ayudo con algo más?").random())
         }
         if (f.tiene("(como me llamo|quien soy|sabes mi nombre)")) {
             return if (Prefs.nombre.isNotBlank()) R("Usted es ${Prefs.nombre}, $tr. Lo tengo muy presente.") else R("Aún no me ha dicho su nombre, $tr. Puede configurarlo en ajustes.")
@@ -828,7 +834,11 @@ class Cerebro(private val ctx: Context) {
     fun lanzar(i: Intent): Boolean = try {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (i.resolveActivity(ctx.packageManager) == null && i.`package` != null) false
-        else { ctx.startActivity(i); true }
+        else {
+            ctx.startActivity(i)
+            if (i.component?.packageName != ctx.packageName) abrioApp = true
+            true
+        }
     } catch (_: ActivityNotFoundException) {
         false
     } catch (_: SecurityException) {
