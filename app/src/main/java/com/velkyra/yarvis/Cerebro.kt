@@ -45,6 +45,16 @@ class Cerebro(private val ctx: Context) {
 
     fun olvidarConversacion() = CerebroIA.olvidar()
 
+    // Conversación en varios pasos ("¿Qué le digo a Juan?")
+    private var pendiente: ((Frase) -> Yarvis.Respuesta?)? = null
+    private var pendienteHasta = 0L
+
+    private fun esperar(pregunta: String, siguiente: (Frase) -> Yarvis.Respuesta?): Yarvis.Respuesta {
+        pendiente = siguiente
+        pendienteHasta = System.currentTimeMillis() + 90_000
+        return R(pregunta, seguir = true)
+    }
+
     fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
         val f = Frase(texto)
         val r = try {
@@ -90,6 +100,14 @@ class Cerebro(private val ctx: Context) {
     private fun local(f: Frase, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta? {
         val t = f.t
         if (t.isBlank()) return R("No le escuché bien, $tr.")
+
+        pendiente?.let { p ->
+            pendiente = null
+            if (System.currentTimeMillis() < pendienteHasta) {
+                if (f.tiene("^(cancela|cancelar|olvidalo|nada|no|ninguno|dejalo)$")) return R("Cancelado, $tr.")
+                p(f)?.let { return it }
+            }
+        }
 
         // --- Control de YARVIS ---------------------------------------------
         if (f.tiene("(deja de escuchar|desactiva la escucha|no me escuches|desactiva la palabra|apaga la escucha)")) {
@@ -249,10 +267,10 @@ class Cerebro(private val ctx: Context) {
         }
 
         // --- Mensajes: WhatsApp y SMS ----------------------------------------
-        mensaje(f)?.let { return it }
-        if (f.tiene("(lee|leeme|que dicen|tengo) (mis |los )?(mensajes|notificaciones|whatsapps?)|mensajes nuevos|quien me escribio")) {
+        if (f.tiene("(lee|leeme|que dicen|tengo|revisa) (mis |los |algun |algunos )?(mensajes|notificaciones|whatsapps?)|mensajes nuevos|quien me escribio|alguien me escribio")) {
             return leerNotificaciones()
         }
+        mensaje(f)?.let { return it }
 
         // --- Llamadas ----------------------------------------------------------
         Regex("^(?:llama|llamar|llamale|marca|marcale|marcar|telefonea|comunicame con|haz una llamada a)\\s+(?:a\\s+|al\\s+|a la\\s+)?(.+?)(?:\\s+por favor)?$").find(t)?.let { m ->
@@ -447,25 +465,97 @@ class Cerebro(private val ctx: Context) {
     //  Acciones
     // =====================================================================
 
+    private val rCanal = Regex("\\s*\\b(?:por|en|via|de|al)?\\s*(?:whatsapp|whats app|wasap|wasa|guasap|wsp|sms|mensaje de texto|mensajito de texto)\\b")
+    private val rSeparador = Regex("(?:\\s+|:\\s*)(?:y\\s+)?(?:que|diciendo(?:le)?(?: que)?|dile que|con el mensaje|el mensaje|con el texto|lo siguiente|esto)(?:\\s+|:\\s*)|:\\s+")
+
+    /** Entiende órdenes de mensajes dichas de muchas formas. */
     private fun mensaje(f: Frase): Yarvis.Respuesta? {
         val t = f.t
-        val canal = "(?:por\\s+)?(?:whatsapp|wasap|wasa|guasap|wsp|sms|mensaje de texto|texto)"
-        val r1 = Regex("^(?:manda(?:le)?|envia(?:le)?|escribe(?:le)?|dile|dale|avisale|mandar|enviar)\\s+(?:un\\s+|una\\s+)?(?:mensaje\\s+(?:de texto\\s+)?|whatsapp\\s+|wasap\\s+|wsp\\s+|sms\\s+|nota\\s+)?(?:$canal\\s+)?(?:a|al|a la|para)\\s+(.+?)\\s+(?:$canal\\s+)?(?:que|diciendo(?:le)? que|diciendo(?:le)?|con el mensaje|dile que)\\s+(.+)$")
-        val m = r1.find(t) ?: return null
-        val quien = f.originalDeGrupo(m, 1).replace(Regex("(?i)\\s*por\\s+(whatsapp|wasap|wsp|sms)$"), "").trim()
-        var texto = f.originalDeGrupo(m, 2).trim()
-        if (texto.isBlank()) return R("¿Qué le digo a $quien, $tr?", seguir = true)
-        texto = texto.replaceFirstChar { it.uppercase() }
-        val porSms = Regex("(sms|mensaje de texto|por texto)").containsMatchIn(t)
+        val intencion = Regex("^(?:por favor\\s+)?(?:quiero\\s+|puedes\\s+|podrias\\s+)?(manda(?:le|me|r)?|envia(?:le|r)?|escribe(?:le)?|escribir(?:le)?|dile|avisale|mensaje|whatsapp|wasap|wsp)\\b").find(t) ?: return null
+        val verbo = intencion.groupValues[1]
+        val esMensaje = rCanal.containsMatchIn(t) || t.contains("mensaje") || verbo.startsWith("dile") || verbo.startsWith("avisale") || verbo.startsWith("escribe")
+        if (!esMensaje) return null
+        val porSms = Regex("(sms|mensaje de texto|mensajito de texto)").containsMatchIn(t)
 
-        val c = Contactos.buscar(ctx, quien)
-        val numero = c?.numero ?: quien.filter { it.isDigit() || it == '+' }.takeIf { it.count { ch -> ch.isDigit() } >= 6 }
-        if (numero == null) {
-            return if (!ctx.tiene(Manifest.permission.READ_CONTACTS)) R("Necesito permiso para ver sus contactos, $tr.")
-            else R("No encontré a $quien en sus contactos, $tr.")
+        // Destinatario: lo que sigue a "a / al / para"
+        val desde = intencion.range.last + 1
+        val marca = Regex("\\b(?:a|al|a la|para|pa)\\s+(?!las?\\s+\\d)").find(t, desde)
+        if (marca == null) return pedirDestinatario(porSms, null)
+        val inicio = marca.range.last + 1
+
+        var quien: String
+        var texto = ""
+        val sep = rSeparador.find(t, inicio)
+        if (sep != null && sep.range.first > inicio) {
+            quien = f.originalEntre(inicio, sep.range.first)
+            texto = f.originalEntre(sep.range.last + 1)
+        } else {
+            // Sin "que": se busca el contacto con las primeras palabras y el resto es el mensaje
+            val palabras = Regex("\\S+").findAll(t, inicio).toList()
+            quien = ""
+            for (k in minOf(4, palabras.size) downTo 1) {
+                val candRango = palabras[0].range.first until palabras[k - 1].range.last + 1
+                val cand = rCanal.replace(t.substring(candRango.first, candRango.last + 1), "").trim()
+                if (cand.isNotBlank() && Contactos.buscar(ctx, cand, estricto = true) != null) {
+                    quien = f.originalEntre(candRango.first, candRango.last + 1)
+                    if (k < palabras.size) texto = f.originalEntre(palabras[k].range.first)
+                    break
+                }
+            }
+            if (quien.isBlank()) {
+                if (palabras.size <= 3) quien = f.originalEntre(inicio) else {
+                    quien = f.originalEntre(palabras[0].range.first, palabras[0].range.last + 1)
+                    texto = f.originalEntre(palabras[1].range.first)
+                }
+            }
         }
-        val nombre = c?.nombre ?: quien
+        quien = quitarCanal(quien)
+        texto = quitarCanal(texto).trim()
 
+        val c = resolverContacto(quien) ?: return if (!ctx.tiene(Manifest.permission.READ_CONTACTS))
+            R("Necesito permiso para ver sus contactos, $tr.")
+        else pedirDestinatario(porSms, texto.ifBlank { null }, "No encontré a $quien en sus contactos, $tr. ¿A quién se lo envío?")
+        if (texto.isBlank()) return pedirTexto(c, porSms)
+        return enviarMensaje(c, texto, porSms)
+    }
+
+    private fun quitarCanal(s: String): String {
+        var r = s.trim()
+        r = r.replace(Regex("(?i)^(por|en|via|al)?\\s*(whatsapp|whats app|wasap|wasa|guasap|wsp|sms|mensaje de texto)\\s+"), "")
+        r = r.replace(Regex("(?i)\\s+(por|en|via|al)?\\s*(whatsapp|whats app|wasap|wasa|guasap|wsp|sms|mensaje de texto)$"), "")
+        r = r.replace(Regex("(?i)^(que|diciendo(le)?( que)?|dile que)\\s+"), "")
+        return r.trim().trim(':', ',', '.').trim()
+    }
+
+    private fun resolverContacto(quien: String): Contactos.Contacto? {
+        if (quien.isBlank()) return null
+        Contactos.buscar(ctx, quien)?.let { return it }
+        val dig = quien.filter { it.isDigit() || it == '+' }
+        if (dig.count { it.isDigit() } >= 6 && quien.count { it.isLetter() } <= 2) return Contactos.Contacto(dig.chunked(3).joinToString(" "), dig)
+        return null
+    }
+
+    private fun pedirDestinatario(sms: Boolean, texto: String?, pregunta: String = "¿A quién le envío el mensaje, $tr?"): Yarvis.Respuesta =
+        esperar(pregunta) { f2 ->
+            val q = quitarCanal(f2.original.replace(Regex("(?i)^(a|al|a la|para)\\s+"), ""))
+            val c = resolverContacto(q)
+            when {
+                c == null -> pedirDestinatario(sms, texto, "No encontré a $q en sus contactos, $tr. ¿A quién se lo envío?")
+                texto.isNullOrBlank() -> pedirTexto(c, sms)
+                else -> enviarMensaje(c, texto, sms)
+            }
+        }
+
+    private fun pedirTexto(c: Contactos.Contacto, sms: Boolean): Yarvis.Respuesta =
+        esperar("¿Qué le digo a ${c.nombre}, $tr?") { f2 ->
+            val texto = f2.original.trim().replace(Regex("(?i)^(dile\\s+)?que\\s+"), "")
+            if (texto.isBlank()) pedirTexto(c, sms) else enviarMensaje(c, texto, sms)
+        }
+
+    private fun enviarMensaje(c: Contactos.Contacto, textoCrudo: String, porSms: Boolean): Yarvis.Respuesta {
+        val texto = textoCrudo.trim().replaceFirstChar { it.uppercase() }
+        val numero = c.numero
+        val nombre = c.nombre
         if (porSms) {
             if (!ctx.tiene(Manifest.permission.SEND_SMS)) return R("Necesito permiso para enviar mensajes de texto, $tr.")
             return try {
@@ -476,7 +566,6 @@ class Cerebro(private val ctx: Context) {
                 R("No pude enviar el mensaje de texto, $tr.")
             }
         }
-
         val url = "https://api.whatsapp.com/send?phone=${Contactos.internacional(numero)}&text=" + Uri.encode(texto)
         val auto = Prefs.whatsappAutomatico && ServicioAccesibilidad.activo
         if (auto) ServicioAccesibilidad.prepararEnvio()
@@ -484,8 +573,8 @@ class Cerebro(private val ctx: Context) {
             lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { if (pkg != null) setPackage(pkg) })
         }
         if (!abierto) return R("No encontré WhatsApp en este celular, $tr.")
-        return if (auto) R("Enviando a $nombre: «$texto».")
-        else R("Le dejé el mensaje listo para $nombre. Solo toque enviar, $tr.")
+        return if (auto) R("Enviando a $nombre por WhatsApp: «$texto».")
+        else R("Le dejé el mensaje listo para $nombre. Solo toque enviar, $tr. Si activa la accesibilidad de YARVIS, lo enviaré yo mismo.")
     }
 
     private fun leerNotificaciones(): Yarvis.Respuesta {

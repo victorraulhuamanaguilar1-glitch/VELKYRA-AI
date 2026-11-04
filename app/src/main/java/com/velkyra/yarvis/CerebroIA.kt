@@ -21,33 +21,94 @@ object CerebroIA {
 
     fun disponible() = Prefs.claveIA.isNotBlank()
 
+    class SinCupo : Exception("sin cupo")
+
+    // Modelos que agotaron su cupo gratuito (modelo -> hasta cuándo no usarlo)
+    private val agotados = HashMap<String, Long>()
+    private var busquedaAgotadaHasta = 0L
+    private var dinamicos: List<String>? = null
+
+    private val preferidos = listOf(
+        "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+        "gemini-2.0-flash", "gemini-2.0-flash-lite"
+    )
+
+    /** ¿La pregunta necesita datos actuales de internet? (la búsqueda gasta cupo, solo se usa si hace falta) */
+    fun necesitaBusqueda(p: String): Boolean = Regex(
+        "(hoy|ahora|actual|ultim|reciente|noticia|precio|cuesta|cotizacion|dolar|tipo de cambio|resultado|partido|quien gano|eleccion|esta semana|este mes|este ano|202[5-9]|busca|investiga|horario|abierto|estreno|clima|temperatura)"
+    ).containsMatchIn(Frase.normalizar(p))
+
     /** Pregunta a la IA. Se llama desde un hilo secundario. */
-    fun preguntar(pregunta: String, extra: String? = null): String {
+    fun preguntar(pregunta: String, extra: String? = null, buscar: Boolean = necesitaBusqueda(pregunta)): String {
         val copia = synchronized(historial) { historial.toList() }
-        val modelos = linkedSetOf(Prefs.modeloIA, Prefs.MODELO_IA, "gemini-2.5-flash", "gemini-2.0-flash").toList()
+        val candidatos = LinkedHashSet<String>()
+        if (Prefs.modeloIA != Prefs.MODELO_IA) candidatos.add(Prefs.modeloIA)
+        candidatos.addAll(preferidos)
+        candidatos.addAll(modelosDisponibles())
         var ultimo: Exception? = null
-        for (modelo in modelos) {
-            try {
-                val r = llamar(modelo, copia, pregunta, extra, !sinBusqueda)
-                synchronized(historial) {
-                    historial.add("user" to pregunta)
-                    historial.add("model" to r)
-                    while (historial.size > 16) historial.removeAt(0)
+        val ahora = System.currentTimeMillis()
+        for (modelo in candidatos) {
+            if ((agotados[modelo] ?: 0L) > ahora) continue
+            var conBusqueda = buscar && !sinBusqueda && busquedaAgotadaHasta < ahora
+            var intentos = 0
+            while (intentos < 2) {
+                intentos++
+                try {
+                    val r = llamar(modelo, copia, pregunta, extra, conBusqueda)
+                    synchronized(historial) {
+                        historial.add("user" to pregunta)
+                        historial.add("model" to r)
+                        while (historial.size > 16) historial.removeAt(0)
+                    }
+                    return r
+                } catch (e: ErrorIA) {
+                    ultimo = e
+                    if (conBusqueda && (e.codigo == 429 || (e.codigo == 400 && e.cuerpo.contains("search", true)))) {
+                        // Se agotó o no está disponible la búsqueda: reintentar sin ella
+                        if (e.codigo == 400) sinBusqueda = true else busquedaAgotadaHasta = ahora + 3_600_000
+                        conBusqueda = false
+                        continue
+                    }
+                    when (e.codigo) {
+                        429 -> agotados[modelo] = ahora + if (e.cuerpo.contains("PerDay", true) || e.cuerpo.contains("per day", true)) 6 * 3_600_000L else 60_000L
+                        404, 400 -> if (e.cuerpo.contains("API key", true) || e.cuerpo.contains("API_KEY", true)) throw e else agotados[modelo] = ahora + 24 * 3_600_000L
+                        else -> if (e.codigo in 500..599) agotados[modelo] = ahora + 120_000L else throw e
+                    }
+                    break
                 }
-                return r
-            } catch (e: ErrorIA) {
-                ultimo = e
-                if (e.codigo == 400 && e.cuerpo.contains("google_search", true) && !sinBusqueda) {
-                    sinBusqueda = true
-                    return preguntar(pregunta, extra)
-                }
-                if (e.codigo != 404) break
-            } catch (e: Exception) {
-                ultimo = e
-                break
             }
         }
+        if (ultimo is ErrorIA && (ultimo.codigo == 429 || ultimo.codigo == 404 || ultimo.codigo == 400)) throw SinCupo()
         throw ultimo ?: IOException("sin respuesta")
+    }
+
+    /** Lista de modelos "flash" disponibles para la clave (se consulta una vez). */
+    private fun modelosDisponibles(): List<String> {
+        dinamicos?.let { return it }
+        val lista = try {
+            val c = URL("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").openConnection() as HttpURLConnection
+            c.setRequestProperty("x-goog-api-key", Prefs.claveIA)
+            c.connectTimeout = 10000
+            c.readTimeout = 10000
+            val j = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            c.disconnect()
+            val arr = j.optJSONArray("models") ?: JSONArray()
+            val r = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                val nombre = m.optString("name").removePrefix("models/")
+                val metodos = m.optJSONArray("supportedGenerationMethods")?.toString().orEmpty()
+                if (!metodos.contains("generateContent")) continue
+                if (!nombre.contains("flash") || Regex("(image|tts|audio|live|embedding|native|exp|preview|thinking)").containsMatchIn(nombre)) continue
+                r.add(nombre)
+            }
+            // Primero los "lite" (más cupo gratuito), luego los más nuevos
+            r.sortedWith(compareByDescending<String> { it.contains("lite") }.thenByDescending { it })
+        } catch (_: Exception) {
+            emptyList()
+        }
+        dinamicos = lista
+        return lista
     }
 
     private fun llamar(modelo: String, hist: List<Pair<String, String>>, pregunta: String, extra: String?, conBusqueda: Boolean): String {
@@ -111,6 +172,7 @@ object CerebroIA {
     fun mensajeError(e: Exception): String {
         val tr = Prefs.trato
         return when {
+            e is SinCupo -> "Se agotó por hoy el cupo gratuito de mi inteligencia artificial, $tr. Las órdenes del celular siguen funcionando con normalidad. El cupo se renueva mañana, o puede añadir otra clave en ajustes." 
             e is ErrorIA && (e.codigo == 400 || e.codigo == 401 || e.codigo == 403) && e.cuerpo.contains("API key", true) ->
                 "Mi clave de inteligencia artificial no es válida, $tr. Puede revisarla en ajustes."
             e is ErrorIA && e.codigo == 403 -> "Google rechazó mi acceso a la inteligencia artificial, $tr. Revise la clave en ajustes."

@@ -27,7 +27,7 @@ fun Context.tiene(permiso: String) = checkSelfPermission(permiso) == PackageMana
 object Contactos {
     data class Contacto(val nombre: String, val numero: String)
 
-    fun buscar(ctx: Context, objetivo: String): Contacto? {
+    fun buscar(ctx: Context, objetivo: String, estricto: Boolean = false): Contacto? {
         if (!ctx.tiene(Manifest.permission.READ_CONTACTS)) return null
         val obj = Frase.normalizar(objetivo)
             .replace(Regex("^(mi |a mi |al |a la |a )"), "")
@@ -53,7 +53,7 @@ object Contactos {
                 }
             }
         }
-        return exacto ?: empieza ?: contiene
+        return if (estricto) exacto ?: empieza?.takeIf { Frase.normalizar(it.nombre).startsWith("$obj ") || Frase.normalizar(it.nombre) == obj } else exacto ?: empieza ?: contiene
     }
 
     /** Número en formato internacional para WhatsApp (Perú por defecto). */
