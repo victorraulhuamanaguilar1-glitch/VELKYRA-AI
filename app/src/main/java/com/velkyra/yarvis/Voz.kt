@@ -41,6 +41,15 @@ object Voz : TextToSpeech.OnInitListener {
         audio = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         tts = TextToSpeech(ctx, this, "com.google.android.tts")
         if (Prefs.usarVozNeural) VozNeural.preparar(ctx)
+
+    }
+
+    /** Elige una voz de Google del celular. */
+    fun usarVozGoogle(v: Voice) {
+        Prefs.usarVozNeural = false
+        Prefs.voz = v.name
+        VozNeural.detener()
+        aplicarVoz()
     }
 
     /** ¿Está hablando con la voz neuronal propia? */
@@ -108,7 +117,6 @@ object Voz : TextToSpeech.OnInitListener {
         val voces = try { tts?.voices } catch (_: Exception) { null } ?: return emptyList()
         val es = voces.filter { it.locale.language == "es" }
             .filter { !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
-            .filter { !it.isNetworkConnectionRequired }
         val regiones = mapOf(
             "US" to "Latinoamérica", "MX" to "México", "ES" to "España", "PE" to "Perú",
             "AR" to "Argentina", "CO" to "Colombia", "CL" to "Chile", "419" to "Latinoamérica"
@@ -122,7 +130,7 @@ object Voz : TextToSpeech.OnInitListener {
                 val m = esMasculina(v)
                 val region = regiones[v.locale.country] ?: v.locale.displayCountry
                 val tipo = if (m) "Masculina" else "Voz"
-                val red = if (v.isNetworkConnectionRequired) " · en línea" else ""
+                val red = if (v.isNetworkConnectionRequired) " · en línea (necesita internet)" else ""
                 OpcionVoz(v, "$tipo ${i + 1} · $region$red", m)
             }
     }
@@ -181,7 +189,8 @@ object Voz : TextToSpeech.OnInitListener {
             return
         }
         // Los textos largos (cuentos) se dividen en partes para que el motor de voz no los corte
-        val partes = dividir(limpiar(texto), 1500)
+        // Partes cortas (oraciones): así la voz de Google no se cae a la voz robótica de respaldo
+        val partes = dividir(limpiar(texto), 350)
         pedirFoco()
         var ok = true
         partes.forEachIndexed { i, parte ->

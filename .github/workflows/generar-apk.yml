@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: voces-cache
-          key: sherpa-1.12.40-voces-mx-ald-es-davefx-v1
+          key: sherpa-1.12.40-voces-6-v2
 
       - name: Descargar voz neuronal
         if: steps.cache-voces.outputs.cache-hit != 'true'
@@ -54,8 +54,8 @@ jobs:
           mkdir -p voces-cache && cd voces-cache
           curl -sSL -o sherpa.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.40/sherpa-onnx-v1.12.40-android.tar.bz2
           tar xjf sherpa.tar.bz2 && rm sherpa.tar.bz2
-          for v in es_MX-ald es_ES-davefx; do
-            curl -sSL -o v.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-$v-medium.tar.bz2
+          for v in es_MX-ald-medium es_ES-davefx-medium es_ES-sharvard-medium es_MX-claude-high es_AR-daniela-high; do
+            curl -sSL -o v.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-$v.tar.bz2
             tar xjf v.tar.bz2 && rm v.tar.bz2
           done
           ls -la
@@ -70,12 +70,13 @@ jobs:
           V=app/src/main/assets/voces
           rm -rf $V && mkdir -p $V
           cp -r voces-cache/vits-piper-es_MX-ald-medium/espeak-ng-data $V/espeak-ng-data
-          for v in es_MX-ald es_ES-davefx; do
+          for full in es_MX-ald-medium es_ES-davefx-medium es_ES-sharvard-medium es_MX-claude-high es_AR-daniela-high; do
+            v=${full%-*}
             mkdir -p $V/$v
-            cp voces-cache/vits-piper-$v-medium/$v-medium.onnx $V/$v/model.onnx
-            cp voces-cache/vits-piper-$v-medium/tokens.txt $V/$v/tokens.txt
+            cp voces-cache/vits-piper-$full/$full.onnx $V/$v/model.onnx
+            cp voces-cache/vits-piper-$full/tokens.txt $V/$v/tokens.txt
           done
-          echo "1" > $V/VERSION
+          echo "2" > $V/VERSION
           du -sh $V app/src/main/jniLibs
 
       - name: Compilar APK

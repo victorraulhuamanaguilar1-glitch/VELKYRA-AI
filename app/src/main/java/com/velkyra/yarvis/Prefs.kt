@@ -66,7 +66,7 @@ object Prefs {
 
     /** Usar la voz neuronal propia (si es false, se usan las voces de Google del celular). */
     var usarVozNeural: Boolean
-        get() = b("usar_voz_neural", true)
+        get() = b("usar_voz_neural", false)
         set(v) = pb("usar_voz_neural", v)
 
     var tonoNeural: Float

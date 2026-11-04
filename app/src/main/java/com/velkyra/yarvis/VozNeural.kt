@@ -21,12 +21,18 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object VozNeural {
 
-    data class Narrador(val id: String, val nombre: String, val descripcion: String)
+    data class Narrador(val id: String, val nombre: String, val descripcion: String, val carpeta: String, val sid: Int = 0)
 
     val NARRADORES = listOf(
-        Narrador("es_MX-ald", "Narrador latino", "Voz neuronal masculina · acento latinoamericano"),
-        Narrador("es_ES-davefx", "Narrador español", "Voz neuronal masculina · acento de España")
+        Narrador("es_MX-ald", "Narrador latino", "Hombre · acento latinoamericano", "es_MX-ald"),
+        Narrador("es_MX-claude", "Narrador mexicano", "Hombre · acento mexicano · alta calidad", "es_MX-claude"),
+        Narrador("es_ES-davefx", "Narrador español", "Hombre · acento de España", "es_ES-davefx"),
+        Narrador("es_ES-sharvard-M", "Caballero español", "Hombre · acento de España", "es_ES-sharvard", 0),
+        Narrador("es_ES-sharvard-F", "Dama española", "Mujer · acento de España", "es_ES-sharvard", 1),
+        Narrador("es_AR-daniela", "Narradora argentina", "Mujer · acento argentino · alta calidad", "es_AR-daniela")
     )
+
+    private fun narrador() = NARRADORES.firstOrNull { it.id == Prefs.vozNeural } ?: NARRADORES[0]
 
     private const val CARPETA = "voces"
     private val principal = Handler(Looper.getMainLooper())
@@ -44,7 +50,7 @@ object VozNeural {
 
     /** Prepara la voz elegida (copia los archivos la primera vez y carga el modelo). */
     fun preparar(ctx: Context, alTerminar: ((Boolean) -> Unit)? = null) {
-        val id = Prefs.vozNeural
+        val id = narrador().carpeta
         if (lista && motorId == id) { alTerminar?.invoke(true); return }
         if (preparando) return
         preparando = true
@@ -119,6 +125,7 @@ object VozNeural {
         if (!lista) return false
         detener()
         val miGen = generacion.incrementAndGet()
+        val sid = narrador().sid
         val oraciones = dividir(texto)
         val cola = LinkedBlockingQueue<FloatArray>(3)
         val FIN = FloatArray(0)
@@ -129,7 +136,7 @@ object VozNeural {
             try {
                 for (o in oraciones) {
                     if (generacion.get() != miGen) break
-                    val audio = synchronized(this) { m.generate(o, 0, velocidad) }
+                    val audio = synchronized(this) { m.generate(o, sid, velocidad) }
                     if (generacion.get() != miGen) break
                     cola.put(audio.samples)
                 }
