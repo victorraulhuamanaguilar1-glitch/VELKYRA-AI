@@ -98,6 +98,11 @@ object Prefs {
         get() = b("wa_auto", true)
         set(v) = pb("wa_auto", v)
 
+    /** Palabras extra que también activan a YARVIS (separadas por coma). */
+    var palabrasExtra: String
+        get() = s("palabras_extra", "")
+        set(v) = ps("palabras_extra", v)
+
     var ciudad: String
         get() = s("ciudad", "")
         set(v) = ps("ciudad", v.trim())

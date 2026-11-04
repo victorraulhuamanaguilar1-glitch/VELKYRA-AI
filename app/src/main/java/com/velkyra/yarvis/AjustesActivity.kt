@@ -91,6 +91,17 @@ class AjustesActivity : Base() {
         })
         act.agregar(texto("En Xiaomi, Huawei, Oppo, Vivo o Samsung, active también «Inicio automático» y quite las restricciones de batería de YARVIS en los ajustes del celular para que nunca se detenga.", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
 
+        // PRUEBA DE ACTIVACIÓN
+        val prueba = seccion("Prueba de la palabra «Yarvis»")
+        prueba.addView(texto("Diga «Yarvis» cerca del celular. Aquí verá lo que entiende el reconocedor sin internet:", 15f, Ui.TEXTO))
+        val oido = texto(if (ServicioEscucha.escuchandoPalabra) "…" else "La escucha no está activa.", 18f, Ui.CIAN_CLARO, Ui.fuerte)
+        prueba.agregar(oido, arriba = dp(8))
+        ServicioEscucha.alOir = { t -> runOnUiThread { oido.text = "«$t»" + if (ServicioEscucha.contienePalabra(t)) "  ✓" else "" } }
+        prueba.agregar(texto("Si al decir «Yarvis» aparece otra palabra (por ejemplo «llar vis»), escríbala aquí para que también me active. Puede poner varias separadas por coma.", 14f, Ui.TEXTO_SUAVE), arriba = dp(10))
+        val cExtra = campo("Ejemplo: llar vis, yar bis", Prefs.palabrasExtra)
+        prueba.agregar(cExtra, arriba = dp(6))
+        prueba.agregar(boton("GUARDAR PALABRAS", false) { Prefs.palabrasExtra = cExtra.text.toString(); Voz.hablar("Guardado, ${Prefs.trato}.") }, arriba = dp(10))
+
         // IA
         val ia = seccion("Inteligencia artificial")
         val estadoIA = when {
@@ -170,6 +181,11 @@ class AjustesActivity : Base() {
         }, arriba = dp(6))
         acerca.agregar(texto("© 2026 VELKYRA. Todos los derechos reservados.", 13f, Ui.TEXTO_SUAVE), arriba = dp(12))
         acerca.agregar(texto("Reconocimiento de voz sin conexión: Vosk (Apache 2.0). Clima: Open-Meteo. Fuentes Orbitron y Rajdhani (SIL OFL).", 12f, Ui.TEXTO_SUAVE), arriba = dp(6))
+    }
+
+    override fun onPause() {
+        ServicioEscucha.alOir = null
+        super.onPause()
     }
 
     private fun elegirVoz() {

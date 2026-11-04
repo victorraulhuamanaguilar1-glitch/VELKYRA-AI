@@ -49,10 +49,18 @@ class ServicioEscucha : Service(), RecognitionListener {
             "yabis", "javis", "jabis", "yarvi", "jarvi", "yarvic", "jervis", "yervis"
         )
 
+        /** Lo último que entendió el reconocedor sin internet (para la prueba en Ajustes). */
+        @Volatile
+        var alOir: ((String) -> Unit)? = null
+
         fun contienePalabra(texto: String): Boolean {
             val n = Frase.normalizar(texto)
             if (n.isBlank()) return false
             if (n.split(" ").any { it in palabrasSueltas }) return true
+            val extras = try { Prefs.palabrasExtra } catch (_: Exception) { "" }
+            for (e in extras.split(",").map { Frase.normalizar(it) }.filter { it.length >= 3 }) {
+                if (Regex("\\b" + Regex.escape(e) + "\\b").containsMatchIn(n)) return true
+            }
             return palabraJunta.containsMatchIn(n.replace(" ", ""))
         }
 
@@ -201,6 +209,7 @@ class ServicioEscucha : Service(), RecognitionListener {
             o.optString("partial").ifBlank { o.optString("text") }
         } catch (_: Exception) { "" }
         if (texto.isBlank()) return
+        alOir?.invoke(texto)
         val ahora = SystemClock.elapsedRealtime()
         if (ahora - ultimaActivacion < 2500 || ahora - reanudadoEn < 700) return
         if (contienePalabra(texto)) {

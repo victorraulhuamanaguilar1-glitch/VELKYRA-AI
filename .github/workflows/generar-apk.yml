@@ -63,7 +63,10 @@ jobs:
 
       - name: Guardar registro de compilación
         if: always()
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          if [ -n "$GEMINI_API_KEY" ]; then echo "si" > /tmp/ia.txt; else echo "no" > /tmp/ia.txt; fi
           mkdir -p /tmp/reg && cp build.log /tmp/reg/ 2>/dev/null || true
           ls -R modelo-es > /tmp/reg/modelo.txt 2>/dev/null || true
           find modelo-es -name "words.txt" -exec grep -iE "^(yar|jar|llar|har|gar|yab|jab)[a-z]*" {} \; >> /tmp/reg/modelo.txt 2>/dev/null || true
@@ -71,7 +74,7 @@ jobs:
           git checkout --orphan registros
           git rm -rfq . > /dev/null
           cp /tmp/reg/* . 2>/dev/null || true
-          echo "${{ job.status }}" > estado.txt
+          echo "${{ job.status }} ia=$(cat /tmp/ia.txt)" > estado.txt
           git add -f build.log modelo.txt estado.txt 2>/dev/null || true
           git commit -qm "Registro run ${{ github.run_number }}" || true
           git push -f origin registros || true
