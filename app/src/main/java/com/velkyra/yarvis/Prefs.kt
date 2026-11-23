@@ -209,6 +209,20 @@ object Prefs {
         get() = s("palabras_extra", "")
         set(v) = ps("palabras_extra", v)
 
+    /** Encontrar el celular con dos aplausos (solo con la pantalla apagada). */
+    var aplausos: Boolean
+        get() = b("aplausos", false)
+        set(v) = pb("aplausos", v)
+
+    /** Gmail: correo y contraseña de aplicación de Google. */
+    var correoUsuario: String
+        get() = s("correo_usuario", "")
+        set(v) = ps("correo_usuario", v.trim())
+
+    var correoClave: String
+        get() = s("correo_clave", "")
+        set(v) = ps("correo_clave", v.trim())
+
     var ciudad: String
         get() = s("ciudad", "")
         set(v) = ps("ciudad", v.trim())

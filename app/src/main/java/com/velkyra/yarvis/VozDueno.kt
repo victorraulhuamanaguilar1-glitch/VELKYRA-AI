@@ -180,6 +180,8 @@ class Captura(
     /** true = con música/video sonando: usa el micrófono con cancelación de eco del sistema. */
     val conEco: Boolean = false,
     private val alMorir: (() -> Unit)? = null,
+    /** Recibe también el audio crudo (detector de aplausos). */
+    private val alAudio: ((ShortArray, Int) -> Unit)? = null,
     private val alTexto: (String, Captura) -> Unit
 ) {
     private val anillo = ShortArray(16000 * 3)
@@ -220,6 +222,7 @@ class Captura(
                     for (i in 0 until n) { anillo[pos] = buf[i]; pos = (pos + 1) % anillo.size }
                     total += n
                 }
+                alAudio?.let { try { it(buf, n) } catch (_: Throwable) {} }
                 val fin = rec.acceptWaveForm(buf, n)
                 val json = if (fin) rec.getResult() else rec.getPartialResult()
                 if (activa) alTexto(json, this)

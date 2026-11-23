@@ -23,7 +23,7 @@ object Oido {
 
     fun disponible(ctx: Context) = SpeechRecognizer.isRecognitionAvailable(ctx)
 
-    fun escuchar(ctx: Context, oyente: Escucha) {
+    fun escuchar(ctx: Context, oyente: Escucha, idiomaForzado: String? = null) {
         cancelar()
         if (!disponible(ctx)) {
             oyente.error("No encuentro el servicio de reconocimiento de voz. Instale o actualice la aplicación de Google.")
@@ -58,10 +58,10 @@ object Oido {
                 if (terminado) return
                 terminado = true
                 liberar(rec)
-                if ((error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) && !reintentoIdioma) {
+                if ((error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) && !reintentoIdioma && idiomaForzado == null) {
                     reintentoIdioma = true
                     idioma = "es-US"
-                    escuchar(ctx, oyente)
+                    escuchar(ctx, oyente, idiomaForzado)
                     return
                 }
                 when (error) {
@@ -75,7 +75,7 @@ object Oido {
         })
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, idioma)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, idiomaForzado ?: idioma)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)

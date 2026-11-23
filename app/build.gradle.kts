@@ -45,6 +45,9 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
+        resources {
+            excludes += setOf("META-INF/NOTICE.md", "META-INF/LICENSE.md", "META-INF/NOTICE.txt", "META-INF/LICENSE.txt")
+        }
     }
     buildFeatures {
         buildConfig = true
@@ -62,4 +65,7 @@ dependencies {
     // Reconocimiento de voz sin internet para la palabra "Yarvis"
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    // Gmail por voz (IMAP/SMTP con contraseña de aplicación)
+    implementation("com.sun.mail:android-mail:1.6.7")
+    implementation("com.sun.mail:android-activation:1.6.7")
 }

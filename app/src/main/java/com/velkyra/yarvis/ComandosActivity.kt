@@ -16,6 +16,13 @@ class ComandosActivity : Base() {
         "Música y videos" to listOf("Reproduce música andina en YouTube", "Pon Daddy Yankee", "Busca recetas de trucha en TikTok", "Pausa la música", "Siguiente canción", "Pon Shakira en Spotify"),
         "Celular" to listOf("Abre WhatsApp", "Enciende la linterna", "Sube el volumen", "Volumen al 50 por ciento", "¿Cuánta batería tengo?", "Modo vibración", "Activa no molestar", "Sube el brillo", "Abre el wifi", "Toma una selfie", "Abre la página velkyra.com"),
         "Manos libres (accesibilidad)" to listOf("Bloquea el celular", "Toma una captura de pantalla", "Ve al inicio", "Atrás", "Apps recientes"),
+        "Mi día" to listOf("Buenos días", "¿Qué me escribió Juan?", "Resúmeme los mensajes de hoy", "¿Tengo correos nuevos?", "Lee el correo de Juan", "Manda un correo a Juan diciendo que mañana le envío el informe"),
+        "Llamadas que entran" to listOf("(Cuando suene) Contesta", "Contesta en altavoz", "Recházala", "Dile que lo llamo luego"),
+        "Ver y leer" to listOf("¿Qué ves?", "¿Qué planta es esta?", "Lee este documento", "Traduce este cartel", "Léeme la pantalla", "Resume esta página", "¿Qué hay en mi pantalla?"),
+        "Traductor" to listOf("Modo traductor al inglés", "¿Cómo se dice «dónde está el baño» en inglés?", "Termina la traducción"),
+        "Modos" to listOf("Modo manejo", "Modo dormir", "Modo reunión", "Modo normal"),
+        "Gastos" to listOf("Gasté 20 soles en pasajes", "Me pagaron 500 soles por el trabajo", "¿Cuánto gasté esta semana?", "¿Cuánto gasté en comida este mes?", "Borra el último gasto"),
+        "Encontrar el celular y copias" to listOf("¿Dónde estás?", "Activa los aplausos", "Haz una copia de seguridad"),
         "Control de ODÍN" to listOf("Deja de escuchar", "Activa la escucha", "Cancela", "Adiós")
     )
 

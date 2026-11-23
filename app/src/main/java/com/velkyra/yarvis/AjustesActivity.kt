@@ -237,6 +237,51 @@ class AjustesActivity : Base() {
         apps.agregar(texto("Ejemplo: llame «mi banco» a la app de su banco y diga «Odín, abre mi banco».", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
         apps.agregar(boton("AGREGAR APP CON NOMBRE PROPIO", false) { agregarAlias() }, arriba = dp(10))
 
+        // MODOS Y EXTRAS
+        val secModos = seccion("Modos")
+        secModos.addView(texto("Manejo: le leo todo en voz alta y responde con la voz. Dormir: no le interrumpo (las alarmas sí suenan). Reunión: vibración y silencio. También puede decir «Odín, modo manejo».", 14f, Ui.TEXTO_SUAVE))
+        val filaModos = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val chipsModos = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((id, nom) in listOf(Modos.NORMAL to "Normal", Modos.MANEJO to "Manejo", Modos.DORMIR to "Dormir", Modos.REUNION to "Reunión")) {
+            chipsModos.addView(chip(nom, Modos.actual == id) {
+                val dicho = if (id == Modos.NORMAL) Modos.desactivar(this) else Modos.activar(this, id)
+                Voz.hablar(dicho); dibujar()
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        }
+        filaModos.addView(chipsModos)
+        secModos.agregar(filaModos, arriba = dp(8))
+        secModos.agregar(interruptor("Encontrarme con dos aplausos", "Si no encuentra el celular, aplauda dos veces y sonaré fuerte. Solo con la pantalla apagada.", Prefs.aplausos) {
+            Prefs.aplausos = it
+            if (it) Prefs.modoEscucha = "siempre"
+            ServicioEscucha.reiniciar()
+        }, arriba = dp(10))
+
+        // CORREO (GMAIL)
+        val co = seccion("Correo (Gmail)")
+        co.addView(estadoPermiso(Correo.configurado, "Gmail conectado: ${Prefs.correoUsuario}", "Gmail sin configurar") {})
+        co.agregar(texto("Para leer y responder sus correos por voz:\n1. Active la «Verificación en 2 pasos» en su cuenta de Google.\n2. Cree una «contraseña de aplicación» con el nombre ODÍN.\n3. Escriba aquí su correo y pegue las 16 letras.", 14f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        co.agregar(boton("CREAR CONTRASEÑA DE APLICACIÓN", false) {
+            try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://myaccount.google.com/apppasswords"))) } catch (_: Exception) {}
+        }, arriba = dp(8))
+        val cCorreo = campo("su.correo@gmail.com", Prefs.correoUsuario).apply { inputType = android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS or android.text.InputType.TYPE_CLASS_TEXT }
+        val cClaveCorreo = campo("Contraseña de aplicación (16 letras)", Prefs.correoClave, clave = true)
+        co.agregar(cCorreo, arriba = dp(8))
+        co.agregar(cClaveCorreo, arriba = dp(6))
+        co.agregar(boton("GUARDAR Y PROBAR", true) {
+            Prefs.correoUsuario = cCorreo.text.toString()
+            Prefs.correoClave = cClaveCorreo.text.toString()
+            android.widget.Toast.makeText(this, "Probando conexión con Gmail…", android.widget.Toast.LENGTH_SHORT).show()
+            Thread {
+                val err = if (Correo.configurado) Correo.probar() else "Escriba su correo y la contraseña de aplicación."
+                runOnUiThread {
+                    Voz.hablar(err ?: "Listo. Su Gmail quedó conectado. Diga: Odín, ¿tengo correos nuevos?")
+                    android.widget.Toast.makeText(this, err ?: "✓ Gmail conectado", android.widget.Toast.LENGTH_LONG).show()
+                    dibujar()
+                }
+            }.start()
+        }, arriba = dp(8))
+        if (Correo.configurado) co.agregar(boton("DESCONECTAR GMAIL", false) { Prefs.correoUsuario = ""; Prefs.correoClave = ""; dibujar() }, arriba = dp(8))
+
         // PERMISOS
         val per = seccion("Permisos")
         per.addView(texto("Revise y conceda todos los permisos que ODÍN necesita.", 15f, Ui.TEXTO))
@@ -246,6 +291,28 @@ class AjustesActivity : Base() {
 
         // DATOS
         val datos = seccion("Datos")
+        val ultimo = getSharedPreferences("yarvis", MODE_PRIVATE).getLong("respaldo_ultimo", 0L)
+        datos.addView(texto("Copia de seguridad: su voz registrada, la palabra entrenada, sus chats con estilo, sus apps, notas, gastos y ajustes. Se guarda sola cada día en Descargas › ODIN." +
+            if (ultimo > 0) "\nÚltima copia: " + java.text.SimpleDateFormat("d MMM yyyy, h:mm a", java.util.Locale.forLanguageTag("es-PE")).format(java.util.Date(ultimo)) else "", 14f, Ui.TEXTO_SUAVE))
+        datos.agregar(boton("GUARDAR COPIA AHORA", true) {
+            Thread {
+                val ok = Respaldo.guardarEnDescargas(this)
+                runOnUiThread { Voz.hablar(if (ok) "Copia guardada en Descargas, carpeta ODIN." else "No pude guardar la copia."); dibujar() }
+            }.start()
+        }, arriba = dp(8))
+        datos.agregar(boton("GUARDAR COPIA EN… (Drive, USB…)", false) {
+            try {
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/json").putExtra(Intent.EXTRA_TITLE, Respaldo.ARCHIVO), 61)
+            } catch (_: Exception) {}
+        }, arriba = dp(8))
+        datos.agregar(boton("RESTAURAR UNA COPIA", false) {
+            try {
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("*/*"), 62)
+            } catch (_: Exception) {}
+        }, arriba = dp(8))
+        datos.agregar(boton("BORRAR MENSAJES GUARDADOS", false) { Bandeja.borrar(); Voz.hablar("Mensajes guardados borrados.") }, arriba = dp(8))
         datos.addView(boton("BORRAR CONVERSACIÓN", false) { Yarvis.borrarHistorial(); Voz.hablar("Conversación borrada.") })
         datos.agregar(boton("BORRAR NOTAS", false) { Prefs.notas = ""; Voz.hablar("Notas borradas.") }, arriba = dp(8))
         datos.agregar(boton("BORRAR RECORDATORIOS", false) { Recordatorios.borrarTodos(this); Voz.hablar("Recordatorios borrados.") }, arriba = dp(8))
@@ -275,6 +342,26 @@ class AjustesActivity : Base() {
         }, arriba = dp(6))
         acerca.agregar(texto("© 2026 VELKYRA. Todos los derechos reservados.", 13f, Ui.TEXTO_SUAVE), arriba = dp(12))
         acerca.agregar(texto("Reconocimiento de voz sin conexión: Vosk (Apache 2.0). Clima: Open-Meteo. Fuentes Orbitron y Rajdhani (SIL OFL).", 12f, Ui.TEXTO_SUAVE), arriba = dp(6))
+    }
+
+    @Deprecated("Requerido para los selectores de archivos")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        when (requestCode) {
+            61 -> Voz.hablar(if (Respaldo.escribir(this, uri)) "Copia de seguridad guardada." else "No pude guardar la copia.")
+            62 -> {
+                val n = Respaldo.leer(this, uri)
+                if (n < 0) { Voz.hablar("Ese archivo no es una copia de ODÍN."); return }
+                AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                    .setTitle("Copia restaurada")
+                    .setMessage("Restauré $n datos. ODÍN se reiniciará para usarlos.")
+                    .setPositiveButton("Reiniciar") { _, _ -> Respaldo.reiniciar(this) }
+                    .setCancelable(false)
+                    .show()
+            }
+        }
     }
 
     override fun onPause() {

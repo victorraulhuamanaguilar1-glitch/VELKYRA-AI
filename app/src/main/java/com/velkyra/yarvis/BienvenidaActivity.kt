@@ -29,7 +29,8 @@ class BienvenidaActivity : Base() {
             val l = mutableListOf(
                 Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE,
                 Manifest.permission.SEND_SMS, Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR,
-                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.CAMERA, Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS
             )
             if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
             return l.toTypedArray()
@@ -121,6 +122,15 @@ class BienvenidaActivity : Base() {
         col.agregar(texto("Su asistente personal con inteligencia artificial. Configuremos todo en menos de un minuto.", 18f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER }, arriba = dp(10))
         col.agregar(View(this), alto = 0, peso = 1f)
         col.agregar(boton("COMENZAR", true) { mostrar(1) })
+        col.agregar(texto("¿Ya usaba ODÍN? Restaurar mi copia de seguridad", 15f, Ui.CIAN_CLARO, Ui.fuerte).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(4))
+            setOnClickListener {
+                try {
+                    startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), 62)
+                } catch (_: Exception) {}
+            }
+        })
         col.agregar(texto("Desarrollado por VELKYRA", 12f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER; alpha = 0.6f }, arriba = dp(14))
         h.postDelayed({ if (paso == 0) Voz.hablar("Hola. Soy ODÍN, su asistente personal. Configuremos todo en menos de un minuto.") }, 600)
         return col
@@ -344,6 +354,13 @@ class BienvenidaActivity : Base() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == 40) mostrar(if (resultCode == RESULT_OK) 6 else 5)
+        if (requestCode == 62 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            val n = Respaldo.leer(this, uri)
+            if (n < 0) { Voz.hablar("Ese archivo no es una copia de ODÍN."); return }
+            Voz.hablar("Copia restaurada. Recuperé su voz, sus chats y sus ajustes. Solo falta darme los permisos de este celular.")
+            mostrar(4)
+        }
     }
 
     // ------------------------------------------------------------------ 6

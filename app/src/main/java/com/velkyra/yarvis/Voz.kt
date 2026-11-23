@@ -181,6 +181,22 @@ object Voz : TextToSpeech.OnInitListener {
         hablarCelular(texto, despues)
     }
 
+    /** Habla en otro idioma (modo traductor) con la voz del celular, y luego vuelve a la voz de siempre. */
+    fun hablarIdioma(texto: String, idioma: String, despues: (() -> Unit)? = null) {
+        val motor = tts
+        if (!lista || motor == null) { hablar(texto, despues); return }
+        VozPremium.detener()
+        val loc = Locale.forLanguageTag(idioma)
+        val r = try { motor.setLanguage(loc) } catch (_: Exception) { TextToSpeech.LANG_NOT_SUPPORTED }
+        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) try { motor.setLanguage(Locale(loc.language)) } catch (_: Exception) {}
+        motor.setPitch(1f)
+        motor.setSpeechRate(0.95f)
+        hablarCelular(texto) {
+            aplicarVoz()
+            despues?.invoke()
+        }
+    }
+
     /** Habla con una voz premium concreta (para probarla en ajustes). */
     fun probarPremium(vozId: String, texto: String) {
         detener()

@@ -247,7 +247,10 @@ class ServicioEscucha : Service() {
             val rec = Recognizer(m, 16000f, gramatica())
             try { rec.setWords(true) } catch (_: Throwable) {}
             reconocedor = rec
-            captura = Captura(rec, false, alMorir = { principal.post { detenerEscucha(); principal.postDelayed({ revisar() }, 1500) } }) { json, c -> revisarTexto(json, c) }
+            val aplausos = if (Prefs.aplausos) DetectorAplausos {
+                if (!pantallaEncendida && !Medios.sonando() && !Localizador.sonando) principal.post { Localizador.sonar(this) }
+            } else null
+            captura = Captura(rec, false, alAudio = aplausos?.let { d -> { b: ShortArray, n: Int -> if (!pantallaEncendida) d.procesar(b, n) } }, alMorir = { principal.post { detenerEscucha(); principal.postDelayed({ revisar() }, 1500) } }) { json, c -> revisarTexto(json, c) }
         } catch (e: Exception) {
             detenerEscucha()
             principal.postDelayed({ revisar() }, 3000)

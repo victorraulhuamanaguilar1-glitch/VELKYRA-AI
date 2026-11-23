@@ -25,7 +25,9 @@ object Yarvis {
         /** Termina la conversación aunque esté activo el modo continuo (despedidas, apps abiertas…). */
         val cerrar: Boolean = false,
         /** Texto extra que solo se muestra en pantalla (por ejemplo, el detalle técnico de un error). */
-        val detalle: String? = null
+        val detalle: String? = null,
+        /** Decirlo en otro idioma (modo traductor), p. ej. "en-US". */
+        val idiomaVoz: String? = null
     )
 
     interface Observador {
@@ -142,7 +144,7 @@ object Yarvis {
     private fun escucharOrden(miSesion: Int) {
         cambiar(Estado.ESCUCHANDO)
         for (o in observadores) o.alParcial(if (enConversacion) "Le escucho… (diga «eso es todo» para terminar)" else "Escuchando…")
-        Oido.escuchar(ctx, object : Oido.Escucha {
+        Oido.escuchar(ctx, idiomaForzado = Traductor.idiomaEscucha(), oyente = object : Oido.Escucha {
             override fun parcial(texto: String) {
                 if (miSesion == sesion) for (o in observadores) o.alParcial(texto)
             }
@@ -199,18 +201,19 @@ object Yarvis {
         for (o in observadores) o.alParcial(r.texto)
         val abrioApp = cerebro.tomarAbrioApp()
         val continuar = r.seguir || (Prefs.conversacionContinua && turnoPorVoz && !r.cerrar && !abrioApp && r.despues == null)
-        Voz.hablar(r.texto) {
-            if (miSesion != sesion) return@hablar
+        val alTerminar: () -> Unit = alTerminar@{
+            if (miSesion != sesion) return@alTerminar
             r.despues?.invoke()
             if (continuar) {
                 ultimaVoz = System.currentTimeMillis()
-                if (!r.seguir) enConversacion = true
+                if (!r.seguir || Traductor.activo != null) enConversacion = true
                 escucharOrden(miSesion)
             } else {
                 enConversacion = false
                 terminar()
             }
         }
+        if (r.idiomaVoz != null) Voz.hablarIdioma(r.texto, r.idiomaVoz, alTerminar) else Voz.hablar(r.texto, alTerminar)
     }
 
     /** Anuncia algo por iniciativa propia (mensajes que llegan, recordatorios). */
@@ -228,8 +231,15 @@ object Yarvis {
      * ODÍN toma la iniciativa: dice algo y se queda escuchando la respuesta (por ejemplo, para confirmar
      * el envío de un mensaje). Si está ocupado, lo intenta de nuevo en unos segundos.
      */
-    fun decirYEscuchar(r: Respuesta, intento: Int = 0): Unit {
+    fun decirYEscuchar(r: Respuesta, intento: Int = 0, urgente: Boolean = false): Unit {
         principal.post {
+            if (urgente && estado != Estado.REPOSO) {
+                // Algo urgente (una llamada): interrumpe lo que esté haciendo
+                sesion++
+                Oido.cancelar()
+                Voz.detener()
+                estado = Estado.REPOSO
+            }
             if (estado != Estado.REPOSO) {
                 if (intento < 24) principal.postDelayed({ decirYEscuchar(r, intento + 1) }, 5000)
                 return@post
@@ -253,6 +263,7 @@ object Yarvis {
 
     private fun terminar() {
         cambiar(Estado.REPOSO)
+        Traductor.terminar()
         Medios.soltar()
         for (o in observadores) o.alNivel(0f)
         val miSesion = sesion

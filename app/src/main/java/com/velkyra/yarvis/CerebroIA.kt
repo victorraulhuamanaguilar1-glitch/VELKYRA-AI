@@ -204,6 +204,63 @@ object CerebroIA {
         throw ultimo ?: SinCupo()
     }
 
+    // --- Visión (cámara y pantalla) -------------------------------------------------------------
+
+    /**
+     * Mira una imagen JPEG y responde la [instruccion] («¿qué ves?», «lee el texto», «traduce»…).
+     * Primero Gemini; si no hay cupo, Llama 4 en Groq. Se llama desde un hilo secundario.
+     */
+    fun verImagen(jpeg: ByteArray, instruccion: String): String {
+        if (!hayInternet()) throw IOException("sin red")
+        val b64 = android.util.Base64.encodeToString(jpeg, android.util.Base64.NO_WRAP)
+        val sistema = "Eres ODÍN, el asistente de voz de ${Prefs.nombre.ifBlank { "el usuario" }}, que vive en Perú. " +
+            "Ves la imagen que te envían desde su celular. Responde en español natural, para ser leído en voz alta: " +
+            "sin listas, viñetas, markdown ni emojis. ${if (Prefs.modoConfianza) "Tutéalo." else "Trátalo de usted y llámalo ${Prefs.trato}."}"
+        var ultimo: Exception? = null
+        if (Gemini.disponible()) {
+            for (modelo in listOf("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite")) {
+                val llave = "Gemini/$modelo"
+                if ((bloqueados[llave] ?: 0L) > System.currentTimeMillis()) continue
+                try {
+                    val partes = JSONArray()
+                        .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
+                        .put(JSONObject().put("text", instruccion))
+                    val cuerpo = JSONObject()
+                        .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sistema))))
+                        .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", partes)))
+                        .put("generationConfig", JSONObject().put("temperature", 0.4).put("maxOutputTokens", 1500))
+                    val j = enviar("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent", cuerpo, mapOf("x-goog-api-key" to Gemini.clave()))
+                    val ps = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                    val sb = StringBuilder()
+                    if (ps != null) for (i in 0 until ps.length()) sb.append(ps.getJSONObject(i).optString("text"))
+                    if (sb.isNotBlank()) { ultimoProveedor = "Gemini · $modelo (visión)"; return sb.toString().trim() }
+                } catch (e: ErrorIA) {
+                    ultimo = e
+                    if (e.codigo == 401 || e.codigo == 403) break
+                    bloqueados[llave] = System.currentTimeMillis() + if (e.codigo == 429) 60_000L else 3_600_000L
+                } catch (e: IOException) { ultimo = e }
+            }
+        }
+        if (groq.disponible()) {
+            for (modelo in listOf("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct")) {
+                try {
+                    val contenido = JSONArray()
+                        .put(JSONObject().put("type", "text").put("text", instruccion))
+                        .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$b64")))
+                    val msgs = JSONArray()
+                        .put(JSONObject().put("role", "system").put("content", sistema))
+                        .put(JSONObject().put("role", "user").put("content", contenido))
+                    val j = enviar("https://api.groq.com/openai/v1/chat/completions",
+                        JSONObject().put("model", modelo).put("messages", msgs).put("max_tokens", 1200).put("temperature", 0.4),
+                        mapOf("Authorization" to "Bearer ${groq.clave()}"))
+                    val t = j.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().trim()
+                    if (t.isNotBlank()) { ultimoProveedor = "Groq · $modelo (visión)"; return t }
+                } catch (e: Exception) { ultimo = e }
+            }
+        }
+        throw ultimo ?: SinCupo()
+    }
+
     private val PROMPT_INTERPRETE = """
         Eres el intérprete de órdenes de un asistente de voz para Android. Convierte lo que dice el usuario en UNA sola
         orden canónica en español, copiando los nombres y textos tal como los dijo. Formatos permitidos:
@@ -236,6 +293,25 @@ object CerebroIA {
         chatea con NOMBRE por mí
         chatea con NOMBRE y pregúntame
         deja de chatear con NOMBRE
+        qué me escribió NOMBRE
+        resúmeme mis mensajes
+        buenos días
+        dónde estás
+        qué ves
+        lee este documento
+        traduce este cartel
+        léeme la pantalla
+        resume la pantalla
+        modo traductor al IDIOMA
+        modo manejo
+        modo dormir
+        modo reunión
+        modo normal
+        gasté MONTO soles en CONCEPTO
+        cuánto gasté hoy | esta semana | este mes
+        lee mis correos
+        manda un correo a NOMBRE diciendo MENSAJE
+        haz una copia de seguridad
         Si el usuario NO está pidiendo una acción del celular (es una pregunta, conversación o petición de información),
         responde exactamente: NINGUNA
         Responde solo con la orden, sin comillas ni explicación.

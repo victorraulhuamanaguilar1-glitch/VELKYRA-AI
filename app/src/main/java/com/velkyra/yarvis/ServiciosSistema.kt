@@ -112,8 +112,18 @@ class ServicioNotificaciones : NotificationListenerService() {
         }
     }
 
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        try { Llamadas.quitada(sbn.key) } catch (_: Exception) {}
+    }
+
     private fun procesar(sbn: StatusBarNotification, silencioso: Boolean = false) {
-        if (sbn.packageName == packageName || sbn.isOngoing) return
+        if (sbn.packageName == packageName) return
+        // Llamadas entrantes (teléfono, WhatsApp…): «Le llama Juan. ¿Contesto?»
+        if (!silencioso && sbn.notification.category == Notification.CATEGORY_CALL) {
+            try { Llamadas.revisar(this, sbn, nombreApp(sbn.packageName)) } catch (_: Exception) {}
+            return
+        }
+        if (sbn.isOngoing) return
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
         val ex = n.extras
@@ -155,24 +165,31 @@ class ServicioNotificaciones : NotificationListenerService() {
             while (respondibles.size > 30) respondibles.removeFirst()
         }
 
+        if (esMensaje) try { Bandeja.agregar(app, tituloLimpio, texto.take(600)) } catch (_: Exception) {}
         if (silencioso) return
         // Chat asistido: ODÍN propone una respuesta y pregunta antes de enviarla
         if (esMensaje && responder != null && ChatAsistido.coincide(tituloLimpio)) {
             ChatAsistido.mensajeRecibido(tituloLimpio, app, texto.take(400))
             return
         }
-        if (!Prefs.leerMensajes || !puedeHablar()) return
+        if (!Modos.puedeAnunciar) return
+        val manejo = Modos.actual == Modos.MANEJO
+        if ((!Prefs.leerMensajes && !manejo) || !puedeHablar(manejo)) return
         val frase = if (esMensaje) "${Prefs.trato.replaceFirstChar { it.uppercase() }}, mensaje de $tituloLimpio por $app: ${texto.take(220)}"
         else "Notificación de $app: $tituloLimpio. ${texto.take(160)}"
-        Yarvis.anunciar(frase)
+        if (manejo && esMensaje && responder != null) {
+            // Modo manejo: lo lee y ofrece responder con la voz
+            val r = Yarvis.cerebro.preguntarAlUsuario("$frase. ¿Le respondo?") { f -> Yarvis.cerebro.respuestaManejo(tituloLimpio, f) }
+            Yarvis.decirYEscuchar(r)
+        } else Yarvis.anunciar(frase)
     }
 
-    private fun puedeHablar(): Boolean {
+    private fun puedeHablar(manejo: Boolean = false): Boolean {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm.currentInterruptionFilter > NotificationManager.INTERRUPTION_FILTER_ALL) return false
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         if (am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION || am.mode == AudioManager.MODE_RINGTONE) return false
-        if (am.ringerMode == AudioManager.RINGER_MODE_SILENT) return false
+        if (am.ringerMode == AudioManager.RINGER_MODE_SILENT && !manejo) return false
         return true
     }
 
@@ -230,6 +247,15 @@ class ServicioAccesibilidad : AccessibilityService() {
         }
 
         fun accion(a: Int): Boolean = instancia?.performGlobalAction(a) ?: false
+
+        /** Todo el texto visible de la app que está en pantalla (sin ODÍN). Null si no hay accesibilidad. */
+        fun textoPantalla(): String? = try { instancia?.leerPantalla() } catch (_: Exception) { null }
+
+        /** Captura de pantalla en JPEG (Android 11+), para que la IA vea imágenes y videos. */
+        fun capturaPantalla(cb: (ByteArray?) -> Unit) {
+            val s = instancia ?: return cb(null)
+            try { s.capturar(cb) } catch (_: Exception) { cb(null) }
+        }
 
         fun permisoConcedido(ctx: Context): Boolean {
             val activos = Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
@@ -336,6 +362,50 @@ class ServicioAccesibilidad : AccessibilityService() {
             buscarPorTexto(h, textos, profundidad + 1, exacto)?.let { return it }
         }
         return null
+    }
+
+    private fun leerPantalla(): String? {
+        val propias = setOf(packageName, "com.android.systemui")
+        val raices = try {
+            windows.filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+                .mapNotNull { it.root }.filter { it.packageName?.toString() !in propias }
+        } catch (_: Exception) { emptyList() }
+        val raiz = raices.firstOrNull() ?: rootInActiveWindow?.takeIf { it.packageName?.toString() !in propias } ?: return null
+        val vistos = LinkedHashSet<String>()
+        fun recorrer(n: AccessibilityNodeInfo?, prof: Int) {
+            if (n == null || prof > 60 || vistos.sumOf { it.length } > 9000) return
+            if (!n.isVisibleToUser) return
+            val t = n.text?.toString()?.trim().orEmpty()
+            val d = n.contentDescription?.toString()?.trim().orEmpty()
+            when {
+                t.isNotEmpty() -> vistos.add(t)
+                d.length > 3 && !n.isClickable -> vistos.add(d)
+            }
+            for (i in 0 until n.childCount) recorrer(n.getChild(i), prof + 1)
+        }
+        recorrer(raiz, 0)
+        return vistos.joinToString("\n").trim().ifBlank { null }
+    }
+
+    private fun capturar(cb: (ByteArray?) -> Unit) {
+        takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+            override fun onSuccess(r: ScreenshotResult) {
+                val bytes = try {
+                    val hb = r.hardwareBuffer
+                    val bm = android.graphics.Bitmap.wrapHardwareBuffer(hb, r.colorSpace)?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                    hb.close()
+                    if (bm == null) null else {
+                        val f = minOf(1f, 1280f / maxOf(bm.width, bm.height))
+                        val esc = if (f < 1f) android.graphics.Bitmap.createScaledBitmap(bm, (bm.width * f).toInt(), (bm.height * f).toInt(), true) else bm
+                        val out = java.io.ByteArrayOutputStream()
+                        esc.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                        out.toByteArray()
+                    }
+                } catch (_: Exception) { null }
+                cb(bytes)
+            }
+            override fun onFailure(codigo: Int) = cb(null)
+        })
     }
 
     override fun onInterrupt() {}

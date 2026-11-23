@@ -99,7 +99,7 @@ class Cerebro(private val ctx: Context) {
         return t.ifBlank { texto }
     }
 
-    private val rAccion = Regex("(public|postea|chatea|estado|llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa)")
+    private val rAccion = Regex("(public|postea|chatea|estado|llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa|gast|pague|compre|correo|email|mail|modo|traduc|pantalla|camara|ves\\b|donde estas|copia|respald|resum|aplau)")
 
     fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
         val limpio = limpiarOrden(texto)
@@ -124,6 +124,13 @@ class Cerebro(private val ctx: Context) {
                         R(rr, seguir = rr.trim().endsWith("?"))
                     }
                 }
+            }
+            // Pregunta sobre la foto que acaba de tomar («¿y de qué color es?»)
+            fotoReciente() != null -> fondo(cb) {
+                val foto = fotoReciente() ?: return@fondo R("", cerrar = true)
+                CamaraActivity.ultimaFotoHora = System.currentTimeMillis()
+                try { R(CerebroIA.verImagen(foto, "$limpio (Responde sobre esta foto que ya viste antes, de forma breve.)"), seguir = true) }
+                catch (e: Exception) { R(CerebroIA.mensajeError(e), cerrar = true, detalle = CerebroIA.detalle(e)) }
             }
             else -> preguntarIA(limpio, cb)
         }
@@ -164,6 +171,16 @@ class Cerebro(private val ctx: Context) {
         val t = f.t
         if (t.isBlank()) return R("No le escuché bien, $tr.")
 
+        // Modo traductor: todo lo que oiga se traduce (hasta «termina la traducción»)
+        if (Traductor.activo != null) {
+            if (!Traductor.turnoOtro && f.tiene("(termina|terminar|salir|sal|deten|para|cancela|desactiva|apaga|fin)( el| la| del)? ?(modo )?(traduc|traductor)|^(eso es todo|ya esta|listo|gracias odin)$")) {
+                Traductor.terminar()
+                return R("Modo traductor terminado, $tr.", cerrar = true)
+            }
+            if (Traductor.turnoOtro && f.tiene("(stop|finish|end) (the )?transla")) { Traductor.terminar(); return R("Modo traductor terminado, $tr.", cerrar = true) }
+            return fondo(cb) { Traductor.turno(f.original) }
+        }
+
         pendiente?.let { p ->
             pendiente = null
             if (System.currentTimeMillis() < pendienteHasta) {
@@ -196,6 +213,9 @@ class Cerebro(private val ctx: Context) {
                 "decirle el clima, controlar la música, la linterna y el volumen, abrir aplicaciones, poner videos, tomar fotos " +
                 "y responder cualquier pregunta. Le abrí la lista completa de órdenes, $tr.")
         }
+
+        // --- Funciones nuevas: encontrar el celular, rutina, modos, traductor, cámara, pantalla, mensajes, gastos, correo, respaldo
+        nuevas(f, cb)?.let { return it }
 
         // --- Seguridad por voz: quién puede darle órdenes ---------------------
         val esDueno = Yarvis.hablanteActual == null
@@ -680,6 +700,397 @@ class Cerebro(private val ctx: Context) {
         }
 
         return null
+    }
+
+    // =====================================================================
+    //  Funciones nuevas (v3.1)
+    // =====================================================================
+
+    private val rSiGeneral = Regex("^(si|sip|claro|dale|ok|okay|okey|de acuerdo|hazlo|correcto|perfecto|listo|por favor|enviala|envialo|mandalo|mandala|leelo|leela)\\b")
+
+    private fun nuevas(f: Frase, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta? {
+        val t = f.t
+
+        // --- Encontrar el celular ------------------------------------------------
+        if (Localizador.sonando && f.tiene("(ya (te|lo) encontre|deja de sonar|para de sonar|callate|silencio|apagate|ya esta)")) {
+            Localizador.parar(ctx); return R("Me alegra que me encontrara, $tr.", cerrar = true)
+        }
+        if (f.tiene("(donde estas|donde te metiste|no te encuentro|no encuentro (mi|el) (celular|telefono|movil)|haz sonar (el|mi|este) (celular|telefono)|suena fuerte|busca(me)? mi (celular|telefono)|(perdi|se me perdio) (mi|el) (celular|telefono))")) {
+            return R("¡Aquí estoy, $tr!", cerrar = true) { Localizador.sonar(ctx) }
+        }
+        if (f.tiene("aplau") && f.tiene("(activa|enciende|prende|usa|quiero|cuando)")) {
+            Prefs.aplausos = true
+            if (Prefs.modoEscucha != "siempre") Prefs.modoEscucha = "siempre"
+            ServicioEscucha.reiniciar()
+            return R("Listo, $tr. Si no me encuentra, aplauda dos veces seguidas y sonaré fuerte. Solo funciona con la pantalla apagada, para no confundirme con otros ruidos.")
+        }
+        if (f.tiene("aplau") && f.tiene("(desactiva|apaga|quita|ya no)")) {
+            Prefs.aplausos = false
+            ServicioEscucha.reiniciar()
+            return R("Desactivé los aplausos, $tr.")
+        }
+
+        // --- Rutina de buenos días -------------------------------------------------
+        val hora = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        if ((f.tiene("^(buenos dias|buen dia|buenas)( odin| yarvis)?$") && hora in 4..12) ||
+            f.tiene("(rutina de (la )?manana|resumen del dia|mi resumen de hoy|como empieza mi dia|informe del dia|mi informe de hoy|que me espera hoy)")) {
+            return fondo(cb) { rutinaManana() }
+        }
+
+        // --- Modos -------------------------------------------------------------------
+        if (f.tiene("(modo (manejo|manejar|conduccion|conducir|auto|carro|carretera)|voy a manejar|estoy manejando|voy manejando|voy a conducir|estoy conduciendo)")) return R(Modos.activar(ctx, Modos.MANEJO))
+        if (f.tiene("(modo (dormir|noche|sueno|descanso)|me voy a dormir|voy a dormir|hora de dormir|ya me duermo)")) return R(Modos.activar(ctx, Modos.DORMIR), cerrar = true)
+        if (f.tiene("(modo (reunion|trabajo|clase|clases|iglesia|misa)|estoy en (una )?reunion|entro a (una )?reunion|voy a entrar a (una )?reunion|estoy en clase)")) return R(Modos.activar(ctx, Modos.REUNION), cerrar = true)
+        if (f.tiene("(en que modo estas|que modo tienes|modo actual)")) return R("Estoy en ${Modos.nombre()}, $tr.")
+        if (Modos.actual != Modos.NORMAL && f.tiene("(modo normal|desactiva el modo|quita el modo|sal del modo|salir del modo|ya llegue|ya desperte|ya me desperte|termino la reunion|ya sali de (la )?reunion|ya termine de manejar|desactiva el modo (manejo|dormir|reunion))")) {
+            return R(Modos.desactivar(ctx))
+        }
+
+        // --- Traductor ----------------------------------------------------------------
+        Regex("(?:modo traductor|traductor|se mi traductor|traduce (?:mi|nuestra|la|esta) conversacion|ayudame a (?:hablar|conversar)(?: con alguien)?|quiero hablar)\\s+(?:al|del|de|en|a|con alguien en|con alguien que habla)\\s+(.+)$").find(t)?.let { m ->
+            val i = Traductor.idioma(m.groupValues[1]) ?: if (f.tiene("traduc")) return R("Ese idioma todavía no lo manejo en conversación, $tr. Puedo con inglés, portugués, francés, italiano, alemán, chino, japonés, coreano y otros.") else return@let
+            Traductor.iniciar(i)
+            return R("Modo traductor al ${i.nombre}, $tr. Hable usted primero en español; yo lo diré en ${i.nombre} y luego escucharé a la otra persona. Para terminar, diga «termina la traducción».", seguir = true)
+        }
+
+        // --- Cámara: ¿qué ves?, leer y traducir con la cámara ----------------------------------
+        val enPantalla = f.tiene("(pantalla|esta pagina|este articulo|este chat|este mensaje|esta conversacion|este correo|esta noticia|esta web|este post|esta publicacion)")
+        if (!enPantalla) {
+            if (f.tiene("^(que ves|que estas viendo|mira esto|que es esto|que es eso|describe lo que ves|dime que ves|que tengo (aqui|en la mano)|que hay (frente a mi|delante)|usa la camara|mira con la camara)")) {
+                return camara("Describe brevemente lo que ves en esta foto (de 2 a 4 oraciones). Si es un objeto, producto, planta, animal o lugar, di qué es. Si hay texto importante, menciónalo.", "¿Qué veo?")
+            }
+            Regex("^que (planta|animal|marca|modelo|raza|insecto|hongo|comida|plato|flor|arbol|pajaro|ave|piedra|medicina|pastilla|billete|moneda) es (esta|este|esto|esa|ese)").find(t)?.let {
+                return camara("${f.original}. Responde mirando la foto, en 2 a 4 oraciones. Si es una medicina, di qué es y recomienda consultar al médico o farmacéutico antes de tomarla.", "Mirando…")
+            }
+            if (f.tiene("^(lee|leeme|lee me)( con la camara)? (este|esta|el|la|lo que dice (el|la|este|esta)) ?(documento|papel|hoja|carta|cartel|letrero|libro|receta|etiqueta|boleta|recibo|factura|aviso|pizarra|cuaderno|pagina del libro|instrucciones|empaque|caja)") || f.tiene("lee con la camara")) {
+                return camara("Lee en voz alta, completo y en orden, todo el texto que aparece en la foto. No describas la imagen; solo el texto, corrigiendo errores evidentes de lectura. Si pasa de 400 palabras, lee lo principal y ofrece leer el resto.", "Leyendo el documento")
+            }
+            Regex("^traduce(?:me)? (?:esto|este|esta|el|la)(?: (?:cartel|letrero|texto|papel|documento|menu|carta|etiqueta|aviso|instrucciones|empaque|caja))?(?: con la camara)?(?: al (.+))?$").find(t)?.let { m ->
+                val idioma = m.groups[1]?.let { Traductor.idioma(it.value)?.nombre } ?: "español"
+                return camara("Traduce al $idioma todo el texto que aparece en la foto. Responde solo con la traducción, natural y lista para leer en voz alta.", "Traduciendo")
+            }
+        }
+
+        // --- Pantalla: leer, resumir, explicar, describir, traducir -------------------------------
+        if (f.tiene("^(lee|leeme|lee me|leer) (esto|eso|aqui|la pantalla|lo que (dice|hay en|sale en) (la )?pantalla|esta pagina|este articulo|este mensaje|este chat|esta conversacion|este correo|esta noticia|este post|esta publicacion|lo que tengo en (la )?pantalla)") ||
+            f.tiene("^que dice (aqui|la pantalla|esto|esta pagina|este mensaje)")) return pantalla("leer", null, cb)
+        if (f.tiene("^(resume|resumeme|resumir|resumen de|hazme un resumen de|haz un resumen de|dame un resumen de) (esto|eso|la pantalla|esta pagina|este articulo|este chat|esta conversacion|este correo|esta noticia|este post|lo que hay en (la )?pantalla)") ||
+            f.tiene("^de que (trata|se trata) (esto|esta pagina|este articulo|este video|esta noticia)")) return pantalla("resumir", null, cb)
+        if (f.tiene("^(explicame|explica|que significa) (esto|eso|lo que hay en (la )?pantalla|esta pagina|este mensaje)")) return pantalla("explicar", null, cb)
+        if (f.tiene("(que (hay|ves|sale) en (la|mi) pantalla|describe (la|mi) pantalla|que estoy viendo|mira (la|mi) pantalla)")) return pantalla("describir", null, cb)
+        Regex("^traduce(?:me)? (?:la pantalla|esta pagina|este mensaje|este chat|este articulo|este correo|esta conversacion|esto que tengo en (?:la )?pantalla)(?: al (.+))?$").find(t)?.let { m ->
+            return pantalla("traducir", m.groups[1]?.let { Traductor.idioma(it.value)?.nombre } ?: "español", cb)
+        }
+
+        // --- Traducción suelta: «cómo se dice gracias en inglés» -------------------------------------
+        Regex("^(?:como se dice|como digo|traduce(?:me)?|traducir|dime en|como se escribe)\\s+(.+?)\\s+(?:al|en)\\s+(ingles|portugues|frances|italiano|aleman|chino|mandarin|japones|coreano|ruso|arabe|hindi|turco|neerlandes|holandes|polaco)$").find(t)?.let { m ->
+            val i = Traductor.idioma(m.groupValues[2]) ?: return@let
+            val texto = f.originalDeGrupo(m, 1).trim('"', '«', '»', ' ')
+            return fondo(cb) {
+                val tr2 = Traductor.traducir(texto, "es", i.codigo) ?: return@fondo R("No pude traducirlo ahora, $tr.")
+                Yarvis.Respuesta(tr2, idiomaVoz = i.voz, detalle = "En ${i.nombre}: $tr2")
+            }
+        }
+
+        // --- Mensajes: ¿qué me escribió Juan?, resumen del día --------------------------------
+        Regex("^(?:que me (?:escribio|dijo|mando|puso|envio|respondio|contesto)|(?:lee(?:me)?|que dicen|repiteme) (?:los |el |sus )?(?:mensajes?|whatsapps?|chats?) (?:de|del)|(?:tengo|hay) mensajes? (?:de|del)|mensajes de)\\s+(.+?)(?:\\s+(?:por whatsapp|por messenger|hoy|ayer))?$").find(t)?.let { m ->
+            val quien = f.originalDeGrupo(m, 1)
+            if (Regex("^(hoy|ayer|whatsapp|todos|mis)").containsMatchIn(m.groupValues[1])) return@let
+            return mensajesDe(quien, cb)
+        }
+        if (f.tiene("(resume|resumeme|resumir|resumen de|hazme un resumen de) (mis|los) (mensajes|whatsapps|chats)|que me escribieron( hoy)?|quien(es)? me escribi(o|eron) hoy|mensajes de hoy|que mensajes tengo hoy")) {
+            return resumenMensajes(cb)
+        }
+
+        // --- Gastos e ingresos --------------------------------------------------------------
+        Gastos.registrar(f)?.let { g ->
+            val hoy = Gastos.entre(Gastos.periodo("hoy").first, System.currentTimeMillis() + 1).filter { !it.ingreso }.sumOf { it.monto }
+            return if (g.ingreso) R("Anotado, $tr: ingreso de ${Gastos.soles(g.monto)}${if (g.concepto != "Ingreso") " por ${g.concepto.lowercase()}" else ""}.")
+            else R("Anotado, $tr: ${Gastos.soles(g.monto)} en ${g.concepto.lowercase()}. Hoy lleva gastados ${Gastos.soles(hoy)}.")
+        }
+        if (f.tiene("(borra|elimina|quita|anula|borrar) (el )?ultimo (gasto|ingreso|movimiento|registro)")) {
+            val g = Gastos.quitarUltimo() ?: return R("No tiene gastos anotados, $tr.")
+            return R("Borré ${if (g.ingreso) "el ingreso" else "el gasto"} de ${Gastos.soles(g.monto)} en ${g.concepto.lowercase()}, $tr.")
+        }
+        if (f.tiene("(cuanto (he )?(gaste|gastado|gasto|llevo gastado|me gaste)|mis gastos|en que (he )?(gaste|gastado)|resumen de (mis )?gastos|cuanto (he )?(recibido|ingresado|cobrado)|mis ingresos|como van mis (gastos|finanzas|cuentas)|mi balance)")) {
+            val concepto = Regex("(?:gast\\w*|gaste) (?:en|de) (?!que)(.+?)(?: (?:hoy|ayer|esta semana|este mes|la semana pasada|el mes pasado|este ano|en total))?$").find(t)?.groupValues?.get(1)
+                ?.takeIf { !Regex("^(total|la semana|el mes|el ano|hoy|ayer)").containsMatchIn(it) }
+            return R(Gastos.informe(t, concepto))
+        }
+
+        // --- Correo (Gmail) -------------------------------------------------------------------
+        Regex("^(?:manda(?:le)?|envia(?:le)?|escribe(?:le)?|redacta)(?:me)? (?:un |una )?(?:correo|email|mail|e mail|e-mail|correo electronico) (?:a|para) (.+?)(?:\\s+(?:diciendo(?:le)?|que dice|que diga|con el mensaje|que|y dile que|y dile)\\s+(.+))?$").find(t)?.let { m ->
+            val dest = f.originalDeGrupo(m, 1)
+            val texto = m.groups[2]?.let { f.originalDeGrupo(m, 2) }
+            return correoNuevo(dest, texto)
+        }
+        if (f.tiene("^(responde|respondele|contesta|contestale)( a)? (el|ese|este|al|su) (correo|email|mail)") || f.tiene("^(responde|respondele|contestale) por correo")) {
+            val texto = Regex("(?:correo|email|mail)(?: de [a-z ]+?)?\\s+(?:diciendo(?:le)?|que dice|que|:)\\s+(.+)$").find(t)?.let { f.originalDeGrupo(it, 1) }
+            return responderCorreo(texto, cb)
+        }
+        if (f.tiene("^(lee|leeme|que dice|abre) (el )?(primer|primero|segundo|tercer|tercero|cuarto|quinto|ultimo)? ?(correo|email|mail)") || f.tiene("^(lee|leeme|que dice) el (correo|email|mail) (de|del) ")) {
+            return fondo(cb) {
+                if (Correo.ultimos.isEmpty() && Correo.configurado) try { Correo.recientes() } catch (_: Exception) {}
+                val m = Correo.elegir(t) ?: Correo.ultimos.firstOrNull() ?: return@fondo R(if (Correo.configurado) "No tengo correos para leer, $tr." else correoSinConfigurar())
+                leerCorreo(m)
+            }
+        }
+        if (f.tiene("((tengo|hay) (correos|emails|mails|correo)|revisa (mi|el) (correo|gmail|email)|lee(me)? (mis|los) (correos|emails|mails)|correos nuevos|mi bandeja de entrada|que correos tengo|me llego (algun )?correo|mis correos)")) {
+            return correosNuevos(cb)
+        }
+
+        // --- Copia de seguridad ---------------------------------------------------------------
+        if (f.tiene("((haz|has|hazme|crea|guarda|saca) (una )?(copia de seguridad|copia de respaldo|respaldo|backup)|respalda (mis datos|todo|tus datos)|guarda (mis|tus) datos)")) {
+            return fondo(cb) {
+                if (Respaldo.guardarEnDescargas(ctx)) R("Listo, $tr. Guardé una copia de todo (su voz, sus chats, sus apps, notas y gastos) en Descargas, carpeta ODIN. Si reinstala, restáurela desde Ajustes, Datos.")
+                else R("No pude guardar la copia, $tr. Inténtelo desde Ajustes, Datos.")
+            }
+        }
+        return null
+    }
+
+    // --- Rutina ---------------------------------------------------------------------------
+    private fun rutinaManana(): Yarvis.Respuesta {
+        val partes = mutableListOf<String>()
+        val nombre = Prefs.nombre.substringBefore(' ').ifBlank { tr }
+        val fecha = SimpleDateFormat("EEEE d 'de' MMMM", es).format(Date())
+        val h = SimpleDateFormat("h:mm a", es).format(Date()).replace("a. m.", "de la mañana").replace("p. m.", "de la tarde").replace("AM", "de la mañana").replace("PM", "de la tarde")
+        partes.add("${saludo()}, $nombre. Hoy es $fecha y son las $h.")
+        try { partes.add(Clima.informe(ctx, null, 0)) } catch (_: Exception) {}
+        try {
+            val ev = Agenda.eventos(ctx, 0).orEmpty()
+            val rec = Recordatorios.lista().filter { Tiempo.diasEntre(Calendar.getInstance(), Calendar.getInstance().apply { timeInMillis = it.cuando }) == 0 }
+                .map { "${SimpleDateFormat("h:mm a", es).format(Date(it.cuando))}, ${it.texto}" }
+            val todo = ev + rec
+            partes.add(if (todo.isEmpty()) "No tiene nada en su agenda para hoy." else "En su agenda de hoy: ${todo.joinToString(". ")}.")
+        } catch (_: Exception) {}
+        try {
+            val noche = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, -12) }.timeInMillis
+            val msj = Bandeja.todos().filter { it.hora >= noche }
+            if (msj.isNotEmpty()) partes.add("Mientras descansaba recibió ${if (msj.size == 1) "un mensaje" else "${msj.size} mensajes"}: ${Bandeja.conteo(msj)}.")
+        } catch (_: Exception) {}
+        try {
+            val tit = Noticias.titulares(null, 3)
+            if (tit.isNotEmpty()) partes.add("Las noticias: " + tit.joinToString(". ") { it.titulo } + ".")
+        } catch (_: Exception) {}
+        partes.add(listOf("Que tenga un excelente día.", "Estoy a su servicio para lo que necesite.", "¡A darle con todo hoy!").random())
+        return R(partes.joinToString(" "), cerrar = true)
+    }
+
+    // --- Cámara ------------------------------------------------------------------------------
+    private fun camara(instruccion: String, titulo: String): Yarvis.Respuesta {
+        if (!CerebroIA.disponible()) return R("Para ver con la cámara necesito la inteligencia artificial activa, $tr.")
+        return R("Apunte la cámara, $tr.", cerrar = true) { CamaraActivity.abrir(ctx, instruccion, titulo) }
+    }
+
+    private fun fotoReciente(): ByteArray? =
+        CamaraActivity.ultimaFoto?.takeIf { System.currentTimeMillis() - CamaraActivity.ultimaFotoHora < 150_000 }
+
+    // --- Pantalla -----------------------------------------------------------------------------
+    private fun pantalla(modo: String, idioma: String?, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta {
+        if (!ServicioAccesibilidad.activo) {
+            lanzar(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return R("Para ver su pantalla necesito el permiso de accesibilidad, $tr. Active ODÍN en la pantalla que le abrí.", cerrar = true)
+        }
+        return fondo(cb) {
+            val texto = if (modo == "describir") null else ServicioAccesibilidad.textoPantalla()
+            if (texto.isNullOrBlank() || texto.length < 40) {
+                // Poco texto (una foto, un video…): mira una captura de la pantalla
+                val img = capturaSinPanel() ?: return@fondo R("No pude ver su pantalla, $tr.")
+                val instr = when (modo) {
+                    "leer" -> "Lee en voz alta el texto principal que aparece en esta captura de pantalla de un celular (ignora menús, botones y barras)."
+                    "resumir" -> "Resume en 3 a 5 oraciones el contenido principal de esta captura de pantalla de un celular."
+                    "explicar" -> "Explica de forma sencilla lo que aparece en esta captura de pantalla de un celular."
+                    "traducir" -> "Traduce al ${idioma ?: "español"} el texto principal de esta captura de pantalla. Responde solo con la traducción."
+                    else -> "Describe brevemente lo que se ve en esta captura de pantalla de un celular: qué app es y qué muestra (imágenes, video, texto principal)."
+                }
+                return@fondo try { R(CerebroIA.verImagen(img, instr), seguir = true) } catch (e: Exception) { R(CerebroIA.mensajeError(e), cerrar = true, detalle = CerebroIA.detalle(e)) }
+            }
+            if (!CerebroIA.disponible()) {
+                return@fondo if (modo == "leer") R(texto.lines().joinToString(". ").take(1200)) else R("Para eso necesito la inteligencia artificial activa, $tr.")
+            }
+            val sistema = when (modo) {
+                "leer" -> "Recibes el texto que aparece en la pantalla del celular del usuario, mezclado con menús, botones y barras. Devuelve SOLO el contenido principal (el artículo, los mensajes, la noticia…), en orden y listo para leer en voz alta, sin comentarios tuyos. En un chat, indica quién dice cada mensaje. Si pasa de 350 palabras, entrega las primeras 350 y termina con: ¿Sigo leyendo?"
+                "resumir" -> "Recibes el texto que aparece en la pantalla del celular del usuario (con menús y botones). Resume el contenido principal en 3 a 5 oraciones claras, para ser escuchadas. Sin listas ni markdown."
+                "explicar" -> "Recibes el texto que aparece en la pantalla del celular del usuario. Explica de forma sencilla y breve qué significa o de qué trata el contenido principal. Sin listas ni markdown."
+                else -> "Traduce al ${idioma ?: "español"} el contenido principal de este texto de una pantalla de celular (ignora menús y botones). Responde solo con la traducción."
+            }
+            try {
+                val r = CerebroIA.preguntar(texto.take(9000), buscar = false, sistemaFijo = sistema, recordar = false)
+                CerebroIA.recordar("(contenido de mi pantalla)", r)
+                R(r, seguir = true)
+            } catch (e: Exception) {
+                if (modo == "leer") R(texto.lines().joinToString(". ").take(1200)) else R(CerebroIA.mensajeError(e), cerrar = true, detalle = CerebroIA.detalle(e))
+            }
+        }
+    }
+
+    /** Captura la pantalla sin la burbuja de ODÍN encima. Se llama desde un hilo secundario. */
+    private fun capturaSinPanel(): ByteArray? {
+        principal.post { VentanaFlotante.ocultar() }
+        Thread.sleep(650)
+        val listo = java.util.concurrent.CountDownLatch(1)
+        var img: ByteArray? = null
+        ServicioAccesibilidad.capturaPantalla { b -> img = b; listo.countDown() }
+        listo.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        principal.post { VentanaFlotante.mostrar(ctx) }
+        return img
+    }
+
+    // --- Mensajes recibidos ---------------------------------------------------------------------
+    private fun mensajesDe(quien: String, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta {
+        val l = Bandeja.de(quien)
+        if (l.isEmpty()) return R("No tengo mensajes de $quien en los últimos dos días, $tr.")
+        val nombre = l.last().quien
+        if (l.size <= 4 || !CerebroIA.disponible()) {
+            val leer = l.takeLast(5).joinToString(" ") { "A las ${Bandeja.hora(it)}: «${it.texto}»." }
+            return R("$nombre le escribió. $leer ¿Le respondo?", seguir = true).also { ofrecerResponder(nombre) }
+        }
+        return fondo(cb) {
+            val r = try {
+                CerebroIA.preguntar(Bandeja.comoTexto(l), buscar = false, recordar = false,
+                    sistemaFijo = "Resume para el usuario, en 2 a 4 oraciones y en voz natural, lo que le escribió $nombre en estos mensajes (lo importante, preguntas pendientes, horarios o pedidos). Trátalo de ${if (Prefs.modoConfianza) "tú" else "usted"}. No inventes nada.")
+            } catch (_: Exception) { l.takeLast(4).joinToString(" ") { "«${it.texto}»." } }
+            ofrecerResponder(nombre)
+            R("$r ¿Le respondo?", seguir = true)
+        }
+    }
+
+    private fun ofrecerResponder(nombre: String) {
+        pendiente = { f2 -> respuestaManejo(nombre, f2) }
+        pendienteHasta = System.currentTimeMillis() + 90_000
+    }
+
+    private fun resumenMensajes(cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta {
+        val l = Bandeja.deHoy()
+        if (l.isEmpty()) return R("Hoy no ha recibido mensajes, $tr.")
+        if (!CerebroIA.disponible()) return R("Hoy recibió ${l.size} mensajes: ${Bandeja.conteo(l)}.")
+        return fondo(cb) {
+            val r = try {
+                CerebroIA.preguntar(Bandeja.comoTexto(l), buscar = false, recordar = false,
+                    sistemaFijo = "Eres el asistente de voz del usuario. Resume los mensajes que recibió hoy, agrupados por persona, en un párrafo natural para ser escuchado (máximo 8 oraciones). Destaca preguntas que esperan respuesta, citas, horarios y pedidos. Trátalo de ${if (Prefs.modoConfianza) "tú" else "usted"}. No inventes nada. Sin listas ni markdown.")
+            } catch (_: Exception) { "Hoy recibió ${l.size} mensajes: ${Bandeja.conteo(l)}." }
+            CerebroIA.recordar("resume mis mensajes de hoy", r)
+            R(r, seguir = true)
+        }
+    }
+
+    /** Respuesta por voz a un mensaje (modo manejo o «¿Le respondo?»). */
+    fun respuestaManejo(quien: String, f: Frase): Yarvis.Respuesta? {
+        val t = f.t
+        val directo = Regex("^(?:si,? )?(?:dile|respondele|contestale|responde|contesta|escribele|ponle)(?: que)?\\s+(.+)$").find(t)
+        return when {
+            directo != null -> enviarRespuesta(quien, f.originalDeGrupo(directo, 1))
+            rSiGeneral.containsMatchIn(t) -> esperar("¿Qué le respondo a $quien, $tr?") { f2 ->
+                val txt = f2.original.trim().replace(Regex("(?i)^(dile\\s+)?que\\s+"), "")
+                if (txt.isBlank()) R("No le respondí, $tr.", cerrar = true) else enviarRespuesta(quien, txt)
+            }
+            f.tiene("^(no|despues|luego|ahora no|dejalo|nada)\\b") -> R("De acuerdo, $tr.", cerrar = true)
+            else -> null
+        }
+    }
+
+    /** Mensaje rápido a un contacto (al rechazar una llamada: «dile que lo llamo luego»). */
+    fun mensajeRapido(quien: String, texto: String, paquete: String): Yarvis.Respuesta {
+        val limpio = texto.trim().replace(Regex("(?i)^que\\s+"), "").replaceFirstChar { it.uppercase() }
+        val c = resolverContacto(quien) ?: return R("Rechacé la llamada, $tr, pero no encontré a $quien en sus contactos para escribirle.", cerrar = true)
+        val r = enviarMensaje(c, limpio, porSms = false)
+        return R("Rechacé la llamada. ${r.texto}", cerrar = true)
+    }
+
+    // --- Correo --------------------------------------------------------------------------------
+    private fun correoSinConfigurar(): String =
+        "Para leer y enviar correos necesito que configure su Gmail en Ajustes, sección Correo, $tr. Le tomará un minuto."
+
+    private fun correosNuevos(cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta = fondo(cb) {
+        if (!Correo.configurado) {
+            // Sin configurar: al menos lo que llegó como notificación de Gmail
+            val gm = Bandeja.todos().filter { it.app.equals("Gmail", true) && it.hora > System.currentTimeMillis() - 86_400_000 }
+            return@fondo if (gm.isEmpty()) R(correoSinConfigurar())
+            else R("Según las notificaciones de Gmail, recibió: ${gm.takeLast(5).joinToString(". ") { "de ${it.quien}: ${it.texto.take(120)}" }}. ${correoSinConfigurar()}")
+        }
+        val l = try { Correo.nuevos() } catch (e: Exception) { return@fondo R("No pude revisar su correo, $tr. ${Correo.probar() ?: ""}".trim(), detalle = e.javaClass.simpleName) }
+        if (l.isEmpty()) return@fondo R("No tiene correos nuevos, $tr.")
+        val orden = listOf("El primero", "El segundo", "El tercero", "El cuarto", "El quinto", "El sexto", "El séptimo", "El octavo")
+        val lista = l.take(5).mapIndexed { i, m -> "${orden[i]}, de ${m.de}: ${m.asunto}." }.joinToString(" ")
+        pendiente = { f2 ->
+            val m = Correo.elegir(f2.t) ?: if (rSiGeneral.containsMatchIn(f2.t)) Correo.ultimos.firstOrNull() else null
+            if (m == null) null else fondo(cb) { leerCorreo(m) }
+        }
+        pendienteHasta = System.currentTimeMillis() + 90_000
+        R("Tiene ${if (l.size == 1) "un correo nuevo" else "${l.size} correos nuevos"}, $tr. $lista ¿Le leo alguno?", seguir = true)
+    }
+
+    /** Se llama desde un hilo secundario. */
+    private fun leerCorreo(m: Correo.Mail): Yarvis.Respuesta {
+        val cuerpo = try { Correo.cuerpo(m) } catch (e: Exception) { return R("No pude abrir ese correo, $tr.", detalle = e.javaClass.simpleName) }
+        val texto = if (cuerpo.length > 900 && CerebroIA.disponible()) try {
+            "En resumen: " + CerebroIA.preguntar(cuerpo.take(9000), buscar = false, recordar = false,
+                sistemaFijo = "Resume este correo en 3 a 5 oraciones para ser escuchado: qué quieren, fechas, montos y qué hay que hacer. Sin listas ni markdown.")
+        } catch (_: Exception) { cuerpo.take(900) } else cuerpo.take(1200)
+        Correo.ultimoLeido = m
+        pendiente = { f2 -> responderCorreoDesdeDialogo(f2) }
+        pendienteHasta = System.currentTimeMillis() + 120_000
+        return R("Correo de ${m.de}, asunto: ${m.asunto}. $texto ¿Le respondo?", seguir = true)
+    }
+
+    private fun responderCorreoDesdeDialogo(f: Frase): Yarvis.Respuesta? {
+        val directo = Regex("^(?:si,? )?(?:dile|respondele|contestale|responde|contesta|escribele|ponle)(?: que)?\\s+(.+)$").find(f.t)
+        return when {
+            directo != null -> confirmarRespuestaCorreo(f.originalDeGrupo(directo, 1))
+            rSiGeneral.containsMatchIn(f.t) -> esperar("¿Qué le respondo, $tr?") { f2 -> confirmarRespuestaCorreo(f2.original) }
+            f.tiene("^(no|despues|luego|ahora no|dejalo|nada)\\b") -> R("De acuerdo, $tr.", cerrar = true)
+            else -> null
+        }
+    }
+
+    private fun responderCorreo(texto: String?, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta {
+        if (!Correo.configurado) return R(correoSinConfigurar())
+        if (Correo.ultimoLeido == null) return R("Primero dígame qué correo quiere responder, $tr. Por ejemplo: lee el correo de Juan.")
+        return if (texto.isNullOrBlank()) esperar("¿Qué le respondo a ${Correo.ultimoLeido?.de}, $tr?") { f2 -> confirmarRespuestaCorreo(f2.original) }
+        else confirmarRespuestaCorreo(texto)
+    }
+
+    private fun confirmarRespuestaCorreo(textoCrudo: String): Yarvis.Respuesta {
+        val m = Correo.ultimoLeido ?: return R("No sé a qué correo responder, $tr.")
+        val texto = textoCrudo.trim().replace(Regex("(?i)^(dile\\s+)?que\\s+"), "").replaceFirstChar { it.uppercase() }
+        return esperar("Le respondo a ${m.de}: «$texto». ¿Lo envío?") { f2 ->
+            if (!rSiGeneral.containsMatchIn(f2.t) && !f2.tiene("^(envia|envialo|mandalo|enviar)")) return@esperar R("No lo envié, $tr.", cerrar = true)
+            Thread {
+                val r = try {
+                    val asunto = if (m.asunto.startsWith("Re:", true)) m.asunto else "Re: ${m.asunto}"
+                    Correo.enviar(m.deCorreo, asunto, texto + firma(), m)
+                    "Respuesta enviada a ${m.de}, $tr."
+                } catch (e: Exception) { "No pude enviar la respuesta, $tr." }
+                Yarvis.anunciar(r)
+            }.start()
+            R("Enviando…", cerrar = true)
+        }
+    }
+
+    private fun firma() = Prefs.nombre.takeIf { it.isNotBlank() }?.let { "\n\n$it" }.orEmpty()
+
+    private fun correoNuevo(dest: String, texto: String?): Yarvis.Respuesta {
+        if (!Correo.configurado) return R(correoSinConfigurar())
+        val directo = Correo.correoDicho(dest)
+        val contacto = if (directo == null) Correo.deContacto(ctx, dest) else null
+        val para = directo ?: contacto?.second ?: return R("No encontré el correo de $dest en sus contactos, $tr. Puede dictármelo, por ejemplo: juan punto perez arroba gmail punto com.")
+        val nombre = contacto?.first ?: para
+        if (texto.isNullOrBlank()) return esperar("¿Qué le escribo a $nombre, $tr?") { f2 -> confirmarCorreo(para, nombre, f2.original) }
+        return confirmarCorreo(para, nombre, texto)
+    }
+
+    private fun confirmarCorreo(para: String, nombre: String, textoCrudo: String): Yarvis.Respuesta {
+        val texto = textoCrudo.trim().replace(Regex("(?i)^(que|diciendo(le)?( que)?)\\s+"), "").replaceFirstChar { it.uppercase() }
+        val asunto = texto.split(Regex("[.!?\\n]")).first().take(60).trim().ifBlank { "Mensaje de ${Prefs.nombre.ifBlank { "ODÍN" }}" }
+        return esperar("Le escribo a $nombre: «$texto». ¿Lo envío?") { f2 ->
+            if (!rSiGeneral.containsMatchIn(f2.t) && !f2.tiene("^(envia|envialo|mandalo|enviar)")) return@esperar R("No lo envié, $tr.", cerrar = true)
+            Thread {
+                val r = try { Correo.enviar(para, asunto, texto + firma()); "Correo enviado a $nombre, $tr." } catch (e: Exception) { "No pude enviar el correo, $tr." }
+                Yarvis.anunciar(r)
+            }.start()
+            R("Enviando…", cerrar = true)
+        }
     }
 
     // =====================================================================

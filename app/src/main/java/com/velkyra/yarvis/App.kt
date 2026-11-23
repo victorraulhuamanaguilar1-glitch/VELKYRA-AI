@@ -25,6 +25,8 @@ class App : Application() {
         Yarvis.init(this)
         // Si el sistema no conectó el lector de notificaciones (pasa tras actualizar en Xiaomi), lo reconecta
         android.os.Handler(mainLooper).postDelayed({ ServicioNotificaciones.reconectar(this) }, 3000)
+        // Copia de seguridad automática (una vez al día, en Descargas/ODIN)
+        android.os.Handler(mainLooper).postDelayed({ Respaldo.automatico(this) }, 15000)
     }
 
     companion object {
