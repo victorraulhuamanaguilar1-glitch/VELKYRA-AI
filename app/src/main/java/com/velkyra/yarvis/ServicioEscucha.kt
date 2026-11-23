@@ -178,7 +178,22 @@ class ServicioEscucha : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
         })
         cargarModelo()
-        ServicioNotificaciones.reconectar(this)
+        principal.postDelayed(vigia, 4000)
+    }
+
+    /**
+     * Cada pocos segundos: si empezó o terminó un video/música, reabre el micrófono en el modo adecuado
+     * (con cancelación de eco mientras suena algo), y si el micrófono se cayó, lo vuelve a abrir.
+     */
+    private val vigia: Runnable = object : Runnable {
+        override fun run() {
+            try {
+                val c = captura
+                if (c != null && c.conEco != Medios.sonando()) { detenerEscucha(); revisar() }
+                else if (c == null && !pausado && modelo != null && Prefs.escuchaActiva) revisar()
+            } catch (_: Exception) {}
+            principal.postDelayed(this, 3000)
+        }
     }
 
     private fun enPrimerPlano(): Boolean = try {
@@ -233,7 +248,7 @@ class ServicioEscucha : Service() {
             val rec = Recognizer(m, 16000f, gramatica())
             try { rec.setWords(true) } catch (_: Throwable) {}
             reconocedor = rec
-            captura = Captura(rec) { json, c -> revisarTexto(json, c) }
+            captura = Captura(rec, Medios.sonando(), alMorir = { principal.post { detenerEscucha(); principal.postDelayed({ revisar() }, 1500) } }) { json, c -> revisarTexto(json, c) }
         } catch (e: Exception) {
             detenerEscucha()
             principal.postDelayed({ revisar() }, 3000)
@@ -347,6 +362,7 @@ class ServicioEscucha : Service() {
     }
 
     override fun onDestroy() {
+        principal.removeCallbacks(vigia)
         detenerEscucha()
         try { unregisterReceiver(receptorPantalla) } catch (_: Exception) {}
         modelo = null

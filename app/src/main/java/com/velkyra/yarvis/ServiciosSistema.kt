@@ -29,6 +29,16 @@ class ServicioNotificaciones : NotificationListenerService() {
 
         val activo get() = conectado != null
 
+        private val CATEGORIAS_IGNORADAS = setOf(
+            Notification.CATEGORY_TRANSPORT, Notification.CATEGORY_PROGRESS, Notification.CATEGORY_SERVICE,
+            Notification.CATEGORY_STATUS, Notification.CATEGORY_SYSTEM
+        )
+        private val APPS_SIN_LECTURA = setOf(
+            "com.google.android.youtube", "com.google.android.apps.youtube.music", "app.revanced.android.youtube",
+            "app.rvx.android.youtube", "com.vanced.android.youtube", "com.google.android.apps.youtube.mango",
+            "com.spotify.music", "deezer.android.app", "org.schabi.newpipe"
+        )
+
         fun recientes(): List<Notif> = synchronized(lista) { lista.toList() }
 
         /** Mensajes que se pueden responder directamente (sin abrir la app). */
@@ -77,12 +87,6 @@ class ServicioNotificaciones : NotificationListenerService() {
             if (activo || !permisoConcedido(ctx)) return
             val c = ComponentName(ctx, ServicioNotificaciones::class.java)
             try { NotificationListenerService.requestRebind(c) } catch (_: Exception) {}
-            try {
-                val pm = ctx.packageManager
-                pm.setComponentEnabledSetting(c, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
-                pm.setComponentEnabledSetting(c, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-            } catch (_: Exception) {}
-            try { NotificationListenerService.requestRebind(c) } catch (_: Exception) {}
         }
 
         /** ¿Puedo trabajar con sus notificaciones? Si tiene el permiso, lo da por bueno y reconecta si hace falta. */
@@ -116,6 +120,9 @@ class ServicioNotificaciones : NotificationListenerService() {
         val titulo = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
         val texto = (ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT))?.toString()?.trim().orEmpty()
         if (titulo.isBlank() || texto.isBlank()) return
+        // Nunca leer las notificaciones de reproducción (YouTube, Spotify, música…): solo mensajes y avisos reales
+        if (ex.containsKey(Notification.EXTRA_MEDIA_SESSION) || n.category in CATEGORIAS_IGNORADAS ||
+            sbn.packageName in APPS_SIN_LECTURA) return
 
         val app = nombreApp(sbn.packageName)
         if (titulo.equals(app, true) && Regex("(mensajes? nuevos?|new messages?|buscando|checking)", RegexOption.IGNORE_CASE).containsMatchIn(texto)) return

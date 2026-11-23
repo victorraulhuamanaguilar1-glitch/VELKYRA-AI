@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import org.json.JSONArray
@@ -173,7 +175,13 @@ object VozDueno {
  * Captura continua del micrófono para la palabra de activación: alimenta al reconocedor sin internet
  * y guarda los últimos segundos de audio para saber QUIÉN dijo la palabra.
  */
-class Captura(private val rec: Recognizer, private val alTexto: (String, Captura) -> Unit) {
+class Captura(
+    private val rec: Recognizer,
+    /** true = con música/video sonando: usa el micrófono con cancelación de eco del sistema. */
+    val conEco: Boolean = false,
+    private val alMorir: (() -> Unit)? = null,
+    private val alTexto: (String, Captura) -> Unit
+) {
     private val anillo = ShortArray(16000 * 3)
     private var pos = 0
     private var total = 0L
@@ -183,10 +191,20 @@ class Captura(private val rec: Recognizer, private val alTexto: (String, Captura
 
     init {
         val min = AudioRecord.getMinBufferSize(16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val fuente = if (conEco) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION
         @Suppress("MissingPermission")
-        val a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+        var a = AudioRecord(fuente, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+        if (a.state != AudioRecord.STATE_INITIALIZED && conEco) {
+            a.release()
+            @Suppress("MissingPermission")
+            a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+        }
         if (a.state != AudioRecord.STATE_INITIALIZED) { a.release(); throw IllegalStateException("micrófono no disponible") }
         ar = a
+        if (conEco) {
+            try { if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(ar.audioSessionId)?.enabled = true } catch (_: Throwable) {}
+            try { if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(ar.audioSessionId)?.enabled = true } catch (_: Throwable) {}
+        }
         ar.startRecording()
         hilo = Thread({ bucle() }, "yarvis-captura").apply { start() }
     }
@@ -208,6 +226,8 @@ class Captura(private val rec: Recognizer, private val alTexto: (String, Captura
             }
         } catch (_: Throwable) {
         }
+        // Si el micrófono se cortó (otra app lo tomó, el sistema lo cerró…), avisar para volver a abrirlo
+        if (activa) alMorir?.invoke()
     }
 
     /** Los últimos [ms] milisegundos de audio. */
