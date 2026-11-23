@@ -38,7 +38,7 @@ class Cerebro(private val ctx: Context) {
 
     private val es = Locale.forLanguageTag("es-PE")
     private val principal = Handler(Looper.getMainLooper())
-    private val tr get() = Prefs.trato
+    private val tr get() = Yarvis.tratoActual
 
     private val ASYNC = Yarvis.Respuesta("\u0000")
     private fun R(t: String, seguir: Boolean = false, cerrar: Boolean = false, detalle: String? = null, despues: (() -> Unit)? = null) = Yarvis.Respuesta(t, seguir, despues, cerrar, detalle)
@@ -178,6 +178,58 @@ class Cerebro(private val ctx: Context) {
             return R("Puedo hacer llamadas, enviar mensajes por WhatsApp y SMS, leer sus notificaciones, programar alarmas, recordatorios y eventos, " +
                 "decirle el clima, controlar la música, la linterna y el volumen, abrir aplicaciones, poner videos, tomar fotos " +
                 "y responder cualquier pregunta. Le abrí la lista completa de órdenes, $tr.")
+        }
+
+        // --- Seguridad por voz: quién puede darle órdenes ---------------------
+        val esDueno = Yarvis.hablanteActual == null
+        if (f.tiene("^(aprende|aprender|reconoce|registra|memoriza|graba|guarda) (bien )?mi voz")) {
+            lanzar(Intent(ctx, VozDuenoActivity::class.java))
+            return R("Le abrí el registro de su voz, $tr. Lea las frases que aparecen en pantalla.", cerrar = true)
+        }
+        Regex("^(?:aprende|aprender|reconoce|registra|memoriza|graba|guarda|agrega|anade)(?: tambien)? (?:la voz de |a )(.+)$").find(t)?.let { m ->
+            if (!esDueno) return R("Solo mi dueño puede autorizar nuevas voces, $tr.")
+            val nombre = f.originalDeGrupo(m, 1).replaceFirstChar { it.uppercase() }
+            lanzar(Intent(ctx, VozDuenoActivity::class.java).putExtra(VozDuenoActivity.EXTRA_NOMBRE, nombre))
+            return R("Muy bien. Que $nombre se acerque al celular y lea las frases de la pantalla, así aprenderé su voz.", cerrar = true)
+        }
+        Regex("^(?:olvida|borra|elimina|quita)(?: la voz de| a)? (.+)$").find(t)?.takeIf { m ->
+            VozDueno.invitados().any { Frase.normalizar(it.nombre) == Frase.normalizar(m.groupValues[1]) }
+        }?.let { m ->
+            if (!esDueno) return R("Solo mi dueño puede hacer eso, $tr.")
+            VozDueno.quitar(m.groupValues[1])
+            return R("Listo, $tr. Ya no atenderé a ${f.originalDeGrupo(m, 1)}.")
+        }
+        if (f.tiene("^(solo|unicamente) (hazme caso|obedeceme|atiendeme|escuchame)( a mi)?|^(ya no le hagas caso|deja de hacerle caso|no le hagas caso)|modo privado|solo a mi")) {
+            if (!esDueno) return R("Solo mi dueño puede cambiar eso, $tr.")
+            Prefs.invitadoHasta = 0
+            return R(if (Prefs.verificarVoz && VozDueno.hayDueno()) "Entendido, $tr. Desde ahora solo atenderé su voz${if (VozDueno.invitados().isNotEmpty()) " y la de las personas que usted registró" else ""}."
+            else "Entendido, $tr. Para que solo atienda su voz, primero debo aprenderla. Diga «aprende mi voz».")
+        }
+        Regex("^(?:hazle caso|hagale caso|obedecele|obedece a|atiendele|atiende a|escuchale|escucha a|haz caso a|hazle caso tambien|deja que te hable|deja que te de ordenes)(?: a| tambien a)?\\s*(.*)$").find(t)?.let { m ->
+            if (!esDueno) return R("Solo mi dueño puede dar ese permiso, $tr.")
+            val quien = m.groupValues[1].trim()
+            val minutos = Regex("(\\d+)\\s*(minuto|hora)").find(t)?.let { val n = it.groupValues[1].toInt(); if (it.groupValues[2] == "hora") n * 60 else n } ?: 30
+            Prefs.invitadoHasta = System.currentTimeMillis() + minutos * 60_000L
+            val registrado = VozDueno.invitados().firstOrNull { quien.isNotBlank() && Frase.normalizar(it.nombre).let { n -> quien.contains(n) || n.contains(quien) } }
+            if (registrado != null) return R("${registrado.nombre} ya está autorizado, $tr. Lo reconoceré por su voz.")
+            val duracion = if (minutos % 60 == 0) "${minutos / 60} hora${if (minutos >= 120) "s" else ""}" else "$minutos minutos"
+            return R("De acuerdo, $tr. Durante los próximos $duracion atenderé a cualquier persona. Si quiere que la recuerde siempre, diga «aprende la voz de» y su nombre.")
+        }
+        if (f.tiene("(quien soy|reconoces mi voz|sabes quien soy|con quien hablas|quien te habla)")) {
+            val h = Yarvis.hablanteActual
+            return R(if (h != null) "Usted es $h. Su voz está registrada y mi dueño le autorizó a darme órdenes."
+            else if (VozDueno.hayDueno()) "Usted es mi dueño${Prefs.nombre.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""}. Reconozco su voz perfectamente."
+            else "Usted es ${Prefs.nombre.ifBlank { "mi dueño" }}. Aunque aún no he aprendido su voz; si lo desea, diga «aprende mi voz».")
+        }
+
+        // --- Personalidad ------------------------------------------------------
+        if (f.tiene("(activa|pon|modo) (el )?modo confianza|^modo confianza|hablame de tu|tuteame|habla(me)? (mas )?(relajado|normal|como amigo)|se mas relajado|deja de ser tan formal")) {
+            Prefs.modoConfianza = true
+            return R("¡Listo! Desde ahora te hablo de tú y en confianza. ¿Qué necesitas?", seguir = true)
+        }
+        if (f.tiene("(modo formal|hablame de usted|se formal|habla formal|desactiva el modo confianza)")) {
+            Prefs.modoConfianza = false
+            return R("Como usted prefiera, $tr. Vuelvo al trato formal.")
         }
 
         // --- Voz de YARVIS -----------------------------------------------------

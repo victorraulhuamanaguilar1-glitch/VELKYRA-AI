@@ -7,3 +7,4 @@ local.properties
 app/src/main/jniLibs/
 app/src/main/assets/voces/
 app/src/main/assets/modelo-es/
+app/src/main/assets/campplus.onnx

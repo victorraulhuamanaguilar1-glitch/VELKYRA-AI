@@ -88,6 +88,35 @@ object Prefs {
         get() = b("soy_creador", false)
         set(v) = pb("soy_creador", v)
 
+    /** Modo confianza: tutea, habla relajado y directo. */
+    var modoConfianza: Boolean
+        get() = b("modo_confianza", false)
+        set(v) = pb("modo_confianza", v)
+
+    /** Solo obedecer a las voces registradas (dueño e invitados permanentes). */
+    var verificarVoz: Boolean
+        get() = b("verificar_voz", false)
+        set(v) = pb("verificar_voz", v)
+
+    /** Qué tan parecida debe ser la voz (0.2 flexible … 0.45 estricto). */
+    var umbralVoz: Float
+        get() = f("umbral_voz", 0.30f)
+        set(v) = pf("umbral_voz", v)
+
+    /** Hasta cuándo atiende a cualquier persona (modo invitado). */
+    var invitadoHasta: Long
+        get() = sp.getLong("invitado_hasta", 0L)
+        set(v) = sp.edit().putLong("invitado_hasta", v).apply()
+
+    var avisarVozDesconocida: Boolean
+        get() = b("avisar_voz_desconocida", true)
+        set(v) = pb("avisar_voz_desconocida", v)
+
+    /** Perfiles de voz registrados (JSON). */
+    var perfilesVoz: String
+        get() = s("perfiles_voz", "[]")
+        set(v) = ps("perfiles_voz", v)
+
     /** Segundos que espera en silencio antes de cerrar la conversación. */
     var esperaConversacion: Int
         get() = sp.getInt("espera_conversacion", 30)

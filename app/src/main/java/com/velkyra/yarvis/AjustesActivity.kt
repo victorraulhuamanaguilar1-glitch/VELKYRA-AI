@@ -52,6 +52,7 @@ class AjustesActivity : Base() {
         perfil.agregar(texto("Ciudad para el clima (si no hay GPS)", 14f, Ui.TEXTO_SUAVE), arriba = dp(12))
         val cCiudad = campo("Ejemplo: Juliaca", Prefs.ciudad)
         perfil.agregar(cCiudad, arriba = dp(4))
+        perfil.agregar(interruptor("Modo confianza", "Le hablo de tú, relajado y directo, como un amigo.", Prefs.modoConfianza) { Prefs.modoConfianza = it }, arriba = dp(8))
         perfil.agregar(interruptor("Yo soy el creador de YARVIS", "Si le pregunta «¿quién te creó?», responderá que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(8))
         perfil.agregar(boton("GUARDAR PERFIL", false) {
             Prefs.nombre = cNombre.text.toString()
@@ -89,6 +90,49 @@ class AjustesActivity : Base() {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
         act.agregar(texto("En Xiaomi, Huawei, Oppo, Vivo o Samsung, active también «Inicio automático» y quite las restricciones de batería de YARVIS en los ajustes del celular para que nunca se detenga.", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
+
+        // SEGURIDAD POR VOZ
+        val seg = seccion("Seguridad por voz")
+        val hayDueno = VozDueno.hayDueno()
+        seg.addView(texto(if (hayDueno) "✓ Su voz está registrada" else "○ Aún no conozco su voz", 16f, if (hayDueno) Ui.VERDE else Ui.AMBAR, Ui.fuerte))
+        seg.agregar(interruptor("Solo obedecer mi voz", "Si alguien más dice «${Prefs.palabraActivacion}», no le haré caso (salvo a las personas que usted autorice).", Prefs.verificarVoz && hayDueno) { on ->
+            if (on && !VozDueno.hayDueno()) startActivity(android.content.Intent(this, VozDuenoActivity::class.java))
+            Prefs.verificarVoz = on
+        }, arriba = dp(6))
+        seg.agregar(boton(if (hayDueno) "VOLVER A APRENDER MI VOZ" else "APRENDER MI VOZ", !hayDueno) {
+            startActivity(android.content.Intent(this, VozDuenoActivity::class.java))
+        }, arriba = dp(8))
+        seg.agregar(texto("Exigencia al reconocer su voz", 14f, Ui.TEXTO_SUAVE), arriba = dp(14))
+        val exig = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((nombre, valor) in listOf("Flexible" to 0.22f, "Normal" to 0.30f, "Estricta" to 0.40f)) {
+            val activo = kotlin.math.abs(Prefs.umbralVoz - valor) < 0.04f
+            exig.addView(chip(nombre, activo) { Prefs.umbralVoz = valor; dibujar() }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        }
+        seg.agregar(exig, arriba = dp(6))
+        seg.agregar(texto("Si a veces no le reconoce, elija «Flexible». Si otra persona logra activarme, elija «Estricta».", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        if (ServicioEscucha.ultimaSimilitud >= 0) seg.agregar(texto("Última voz escuchada: ${(ServicioEscucha.ultimaSimilitud * 100).toInt()}% de coincidencia (se exige ${(Prefs.umbralVoz * 100).toInt()}%)", 13f, Ui.CIAN_CLARO), arriba = dp(4))
+
+        seg.agregar(texto("Personas autorizadas", 14f, Ui.TEXTO_SUAVE), arriba = dp(16))
+        val inv = VozDueno.invitados()
+        if (inv.isEmpty()) seg.agregar(texto("Ninguna todavía. También puede decir: «${Prefs.palabraActivacion}, aprende la voz de María».", 14f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        for (p in inv) {
+            val fila = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            fila.agregar(texto("●  ${p.nombre}", 17f, Ui.TEXTO, Ui.fuerte), ancho = 0, peso = 1f)
+            fila.addView(texto("Quitar", 15f, Ui.ROJO, Ui.fuerte).apply { setPadding(dp(12), dp(8), 0, dp(8)); setOnClickListener { VozDueno.quitar(p.nombre); dibujar() } })
+            seg.agregar(fila, arriba = dp(4))
+        }
+        val cInv = campo("Nombre de la persona")
+        seg.agregar(cInv, arriba = dp(8))
+        seg.agregar(boton("AGREGAR PERSONA", false) {
+            val n = cInv.text.toString().trim()
+            if (n.isNotBlank()) startActivity(android.content.Intent(this, VozDuenoActivity::class.java).putExtra(VozDuenoActivity.EXTRA_NOMBRE, n))
+        }, arriba = dp(8))
+        if (VozDueno.modoInvitado) {
+            val hasta = java.text.SimpleDateFormat("h:mm a", java.util.Locale.forLanguageTag("es-PE")).format(java.util.Date(Prefs.invitadoHasta))
+            seg.agregar(texto("Modo invitado activo hasta las $hasta: atiendo a cualquier persona.", 14f, Ui.AMBAR, Ui.fuerte), arriba = dp(12))
+            seg.agregar(boton("DESACTIVAR MODO INVITADO", false) { Prefs.invitadoHasta = 0; dibujar() }, arriba = dp(6))
+        }
+        seg.agregar(interruptor("Avisar cuando no reconozco una voz", null, Prefs.avisarVozDesconocida) { Prefs.avisarVozDesconocida = it }, arriba = dp(8))
 
         // PALABRA DE ACTIVACIÓN
         val pal = seccion("Palabra de activación")

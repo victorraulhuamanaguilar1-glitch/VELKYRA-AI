@@ -19,15 +19,13 @@ import org.vosk.LibVosk
 import org.vosk.LogLevel
 import org.vosk.Model
 import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener
-import org.vosk.android.SpeechService
 import java.io.File
 
 /**
  * Servicio en segundo plano que escucha la palabra «Yarvis» SIN internet (Vosk).
  * Nada de lo que escucha sale del celular.
  */
-class ServicioEscucha : Service(), RecognitionListener {
+class ServicioEscucha : Service() {
 
     companion object {
         private const val ID_NOTIF = 7
@@ -40,7 +38,10 @@ class ServicioEscucha : Service(), RecognitionListener {
             private set
 
         val activo get() = instancia != null
-        val escuchandoPalabra get() = instancia?.speech != null
+        val escuchandoPalabra get() = instancia?.captura != null
+
+        /** Similitud de la última voz que dijo la palabra (para la prueba en ajustes). */
+        @Volatile var ultimaSimilitud = -1f
 
         /** Palabras parecidas o comunes que sirven de «señuelo» para que no se active por error. */
         private val SENUELOS = listOf(
@@ -135,8 +136,9 @@ class ServicioEscucha : Service(), RecognitionListener {
     private val principal = Handler(Looper.getMainLooper())
     private var modelo: Model? = null
     private var reconocedor: Recognizer? = null
-    var speech: SpeechService? = null
+    var captura: Captura? = null
         private set
+    private var ultimoAvisoRechazo = 0L
     private var pausado = false
     private var pantallaEncendida = true
     private var cargando = false
@@ -213,38 +215,34 @@ class ServicioEscucha : Service(), RecognitionListener {
     }
 
     private fun iniciarEscucha() {
-        if (speech != null) return
+        if (captura != null) return
         val m = modelo ?: return
         try {
             val rec = Recognizer(m, 16000f, gramatica())
             try { rec.setWords(true) } catch (_: Throwable) {}
-            val s = SpeechService(rec, 16000f)
-            s.startListening(this)
             reconocedor = rec
-            speech = s
+            captura = Captura(rec) { json, c -> revisarTexto(json, c) }
         } catch (e: Exception) {
             detenerEscucha()
+            principal.postDelayed({ revisar() }, 3000)
         }
     }
 
     private fun detenerEscucha() {
-        speech?.let {
-            try { it.stop() } catch (_: Exception) {}
-            try { it.shutdown() } catch (_: Exception) {}
-        }
-        speech = null
+        captura?.let { try { it.detener() } catch (_: Exception) {} }
+        captura = null
         reconocedor?.let { try { it.close() } catch (_: Exception) {} }
         reconocedor = null
     }
 
-    private fun revisarTexto(json: String?) {
+    /** Se llama desde el hilo de captura con cada resultado del reconocedor. */
+    private fun revisarTexto(json: String?, c: Captura) {
         if (json.isNullOrBlank()) return
         var confianzaOk = true
         val texto = try {
             val o = JSONObject(json)
             val palabras = o.optJSONArray("result")
             if (palabras != null) {
-                // Resultado final: se exige una confianza mínima para «jarvis»
                 // Resultado final: solo cuentan las palabras reconocidas con suficiente confianza
                 val seguras = (0 until palabras.length()).map { palabras.getJSONObject(it) }
                     .filter { it.optDouble("conf", 1.0) >= 0.35 }.joinToString(" ") { it.optString("word") }
@@ -256,24 +254,37 @@ class ServicioEscucha : Service(), RecognitionListener {
         alOir?.invoke(texto.replace("[unk]", "…"))
         val ahora = SystemClock.elapsedRealtime()
         if (ahora - ultimaActivacion < 2500 || ahora - reanudadoEn < 700) return
-        if (confianzaOk && contienePalabra(texto)) {
-            ultimaActivacion = ahora
-            detenerEscucha()
-            Yarvis.activar(true)
-        }
-    }
+        if (!confianzaOk || !contienePalabra(texto)) return
+        ultimaActivacion = ahora
 
-    // --- Vosk -------------------------------------------------------------
-    override fun onPartialResult(hypothesis: String?) = revisarTexto(hypothesis)
-    override fun onResult(hypothesis: String?) = revisarTexto(hypothesis)
-    override fun onFinalResult(hypothesis: String?) = revisarTexto(hypothesis)
-    override fun onError(exception: Exception?) {
-        detenerEscucha()
-        principal.postDelayed({ revisar() }, 2000)
-    }
-    override fun onTimeout() {
-        detenerEscucha()
-        revisar()
+        // ¿Quién lo dijo?
+        var permitido = true
+        var invitado: String? = null
+        val verificar = Prefs.verificarVoz && VozDueno.hayDueno() && !VozDueno.modoInvitado
+        if (verificar || VozDueno.invitados().isNotEmpty()) {
+            val h = VozDueno.huella(this, c.ultimos(1600))
+            if (h != null) {
+                val (perfil, sim) = VozDueno.identificar(h)
+                ultimaSimilitud = sim
+                val reconocido = perfil != null && sim >= Prefs.umbralVoz
+                if (reconocido && perfil?.dueno == false) invitado = perfil.nombre
+                if (verificar && !reconocido) permitido = false
+            }
+            // Si no se pudo calcular la huella, se atiende igual (para no dejar al dueño sin asistente)
+        }
+
+        if (!permitido) {
+            if (Prefs.avisarVozDesconocida && ahora - ultimoAvisoRechazo > 30_000) {
+                ultimoAvisoRechazo = ahora
+                principal.post { Yarvis.anunciar("Disculpe, no reconozco su voz. Solo atiendo a mi dueño y a las personas que él autoriza.", guardar = false) }
+            }
+            return
+        }
+        c.activa = false
+        principal.post {
+            detenerEscucha()
+            Yarvis.activar(true, invitado)
+        }
     }
 
     // --- Notificación fija ----------------------------------------------------
@@ -295,7 +306,7 @@ class ServicioEscucha : Service(), RecognitionListener {
             cargando -> "Preparando el reconocimiento de voz…"
             !activa -> "Escucha en pausa. Toque «Reanudar» para activarla."
             modelo == null -> "No se pudo cargar el modelo de voz."
-            speech != null -> "Diga «${Prefs.palabraActivacion}» para activarme."
+            captura != null -> "Diga «${Prefs.palabraActivacion}» para activarme." + if (Prefs.verificarVoz && VozDueno.hayDueno()) " Solo atiendo su voz." else ""
             Prefs.modoEscucha == "pantalla" && !pantallaEncendida -> "En espera hasta que encienda la pantalla."
             else -> "Atendiendo su solicitud…"
         }

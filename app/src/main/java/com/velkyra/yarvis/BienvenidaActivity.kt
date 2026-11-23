@@ -332,6 +332,9 @@ class BienvenidaActivity : Base() {
         t.addView(texto("Palabra actual: «${Prefs.palabraActivacion}»", 18f, Ui.TEXTO, Ui.fuerte))
         t.agregar(texto(if (Prefs.muestras().isNotEmpty()) "✓ Ya entrenada" else "Toma menos de un minuto. Puede elegir Yarvis, Jarvis, Velkyra o la que prefiera.", 15f, if (Prefs.muestras().isNotEmpty()) Ui.VERDE else Ui.TEXTO_SUAVE), arriba = dp(6))
         addView(t)
+        agregar(boton("RECONOCER MI VOZ (solo le obedeceré a usted)", false) {
+            startActivity(Intent(this@BienvenidaActivity, VozDuenoActivity::class.java))
+        }, arriba = dp(18))
         agregar(boton("ENTRENAR AHORA", true) {
             startActivityForResult(Intent(this@BienvenidaActivity, EntrenamientoActivity::class.java).putExtra(EntrenamientoActivity.EXTRA_DESDE_BIENVENIDA, true), 40)
         }, arriba = dp(18))

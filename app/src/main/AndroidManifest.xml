@@ -120,6 +120,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".VozDuenoActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".ComandosActivity"
             android:exported="false"
             android:screenOrientation="portrait" />

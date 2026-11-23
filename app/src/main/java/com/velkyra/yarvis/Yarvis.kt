@@ -109,8 +109,17 @@ object Yarvis {
         cerebro.olvidarConversacion()
     }
 
+    /** Quién está hablando ahora: null = el dueño; si no, el nombre del invitado reconocido. */
+    @Volatile
+    var hablanteActual: String? = null
+        private set
+
+    /** Cómo dirigirse a quien habla ahora. */
+    val tratoActual: String get() = hablanteActual ?: Prefs.trato
+
     /** Despierta a YARVIS (por la palabra "Yarvis", al tocar el núcleo o desde la notificación). */
-    fun activar(porPalabra: Boolean) = principal.post {
+    fun activar(porPalabra: Boolean, invitado: String? = null) = principal.post {
+        hablanteActual = if (porPalabra) invitado else null
         val miSesion = ++sesion
         ultimaVoz = System.currentTimeMillis()
         enConversacion = false
@@ -120,7 +129,7 @@ object Yarvis {
         if (!pantallaVisible) VentanaFlotante.mostrar(ctx)
         if (porPalabra && Prefs.responderAlActivar) {
             cambiar(Estado.HABLANDO)
-            val frase = String.format(frasesActivacion.random(), Prefs.trato)
+            val frase = String.format(frasesActivacion.random(), tratoActual)
             for (o in observadores) o.alParcial(frase)
             Voz.hablar(frase) { if (miSesion == sesion) escucharOrden(miSesion) }
         } else {
@@ -172,6 +181,7 @@ object Yarvis {
         turnoPorVoz = sesionDada >= 0
         if (sesionDada < 0) {
             enConversacion = false
+            hablanteActual = null
             Oido.cancelar()
             Voz.detener()
             ServicioEscucha.pausar()
