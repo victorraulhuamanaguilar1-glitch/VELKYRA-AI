@@ -277,7 +277,9 @@ class ServicioEscucha : Service() {
             if (h != null) {
                 val (perfil, sim) = VozDueno.identificar(h)
                 ultimaSimilitud = sim
-                val reconocido = perfil != null && sim >= Prefs.umbralVoz
+                // Con música o video de fondo la huella sale menos parecida: se exige un poco menos
+                val umbral = if (Medios.sonando()) Prefs.umbralVoz * 0.8f else Prefs.umbralVoz
+                val reconocido = perfil != null && sim >= umbral
                 if (reconocido && perfil?.dueno == false) invitado = perfil.nombre
                 if (verificar && !reconocido) permitido = false
             }

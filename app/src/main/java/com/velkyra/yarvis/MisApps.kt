@@ -51,6 +51,47 @@ object MisApps {
 
     fun elegir(ctx: Context, categoria: String, pkg: String) = prefs(ctx).edit().putString("app_$categoria", pkg).apply()
 
+    /** Opciones a mostrar en Ajustes: las conocidas que estén instaladas + la que el usuario eligió de su lista. */
+    fun opcionesDe(ctx: Context, categoria: String): List<Opcion> {
+        val cat = CATEGORIAS.firstOrNull { it.id == categoria } ?: return emptyList()
+        val l = cat.opciones.filter { instalada(ctx, it.paquete) }.distinctBy { it.nombre }.toMutableList()
+        val g = prefs(ctx).getString("app_$categoria", null)
+        if (g != null && instalada(ctx, g) && l.none { it.paquete == g }) l.add(Opcion(g, nombreDe(ctx, g)))
+        return l
+    }
+
+    private val YOUTUBES = listOf(
+        "com.google.android.youtube", "app.revanced.android.youtube", "app.rvx.android.youtube",
+        "com.vanced.android.youtube", "com.google.android.apps.youtube.mango", "org.schabi.newpipe"
+    )
+
+    /** ¿Es una app de YouTube (oficial, ReVanced, Vanced, Go, NewPipe…)? */
+    fun esYoutube(ctx: Context, pkg: String?): Boolean {
+        if (pkg == null) return false
+        if (pkg in YOUTUBES) return true
+        val n = Frase.normalizar(nombreDe(ctx, pkg))
+        return n.contains("youtube") && !n.contains("music")
+    }
+
+    /** La app de YouTube del usuario: la que eligió en Mis apps, la oficial o cualquier otra que diga «YouTube». */
+    fun youtube(ctx: Context): String? {
+        listOf("videos", "musica").mapNotNull { prefs(ctx).getString("app_$it", null) }
+            .firstOrNull { instalada(ctx, it) && esYoutube(ctx, it) }?.let { return it }
+        YOUTUBES.firstOrNull { instalada(ctx, it) }?.let { return it }
+        return instaladas(ctx).firstOrNull { esYoutube(ctx, it.paquete) }?.paquete
+    }
+
+    /** Busca una app por cómo la nombró el usuario: primero sus nombres propios, luego el nombre de la app instalada. */
+    fun buscarApp(ctx: Context, dicho: String): Opcion? {
+        buscarAlias(ctx, dicho)?.let { return Opcion(it.paquete, it.nombre) }
+        val d = Frase.normalizar(dicho).replace(Regex("^(la app (de )?|la aplicacion (de )?|el |la |mi )"), "").trim()
+        if (d.length < 2) return null
+        val apps = instaladas(ctx)
+        return apps.firstOrNull { Frase.normalizar(it.nombre) == d }
+            ?: apps.firstOrNull { Frase.normalizar(it.nombre).replace(" ", "") == d.replace(" ", "") }
+            ?: apps.firstOrNull { val n = Frase.normalizar(it.nombre); d.length >= 4 && (n.startsWith("$d ") || n.contains(d)) }
+    }
+
     fun nombreDe(ctx: Context, pkg: String?): String {
         if (pkg == null) return "Ninguna instalada"
         CATEGORIAS.flatMap { it.opciones }.firstOrNull { it.paquete == pkg }?.let { return it.nombre }

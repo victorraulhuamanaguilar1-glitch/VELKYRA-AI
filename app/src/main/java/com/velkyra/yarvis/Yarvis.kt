@@ -126,6 +126,7 @@ object Yarvis {
         Oido.cancelar()
         Voz.detener()
         ServicioEscucha.pausar()
+        Medios.retener() // pausa el video/música mientras le escucho
         if (!pantallaVisible) VentanaFlotante.mostrar(ctx)
         if (porPalabra && Prefs.responderAlActivar) {
             cambiar(Estado.HABLANDO)
@@ -252,6 +253,7 @@ object Yarvis {
 
     private fun terminar() {
         cambiar(Estado.REPOSO)
+        Medios.soltar()
         for (o in observadores) o.alNivel(0f)
         val miSesion = sesion
         principal.postDelayed({

@@ -565,10 +565,15 @@ class Cerebro(private val ctx: Context) {
         if (f.tiene("pantalla dividida")) return global(AccessibilityService.GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN, "Pantalla dividida, $tr.")
 
         // --- Música ------------------------------------------------------------
-        if (f.tiene("^(pausa|pausar|deten|detener|para)( la)?( musica| cancion| video| reproduccion)?$") || f.tiene("(pausa|deten|para) la (musica|cancion)")) {
-            return tecla(KeyEvent.KEYCODE_MEDIA_PAUSE, "En pausa, $tr.")
+        if (f.tiene("^(pausa|pausalo|pausala|pausar|deten|detenlo|detenla|detener|para|paralo|parala|parar|stop|quita|quitalo|apaga|silencia|callate)( (el|la|lo|ese|esa|este|esta))?( (musica|cancion|video|videos|reproduccion|youtube|tema|audio|sonido))?( (por favor|ya))?$") ||
+            f.tiene("(pausa|pausar|deten|detener|para|parar|quita|apaga|corta|detenga|pare) (el|la|ese|esa|este|esta) (musica|cancion|video|reproduccion|tema|audio)")) {
+            Medios.pausar()
+            return R("En pausa, $tr.", cerrar = true)
         }
-        if (f.tiene("^(continua|reanuda|sigue|play|dale play)( la)?( musica| cancion| reproduccion)?$")) return tecla(KeyEvent.KEYCODE_MEDIA_PLAY, "Reanudando, $tr.")
+        if (f.tiene("^(continua|continuar|reanuda|reanudalo|sigue|play|dale play|dale)( (el|la))?( (musica|cancion|video|reproduccion))?$")) {
+            Medios.reanudar()
+            return R("Reanudando, $tr.", cerrar = true)
+        }
         if (f.tiene("(siguiente|pasa la|salta la|otra) cancion|^siguiente$|cambia de cancion")) return tecla(KeyEvent.KEYCODE_MEDIA_NEXT, "Siguiente canción, $tr.")
         if (f.tiene("cancion anterior|^anterior$|regresa la cancion")) return tecla(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Canción anterior, $tr.")
         if (f.tiene("^(pon|reproduce|toca) (algo de )?musica$")) return tecla(KeyEvent.KEYCODE_MEDIA_PLAY, "Reproduciendo música, $tr.")
@@ -885,7 +890,7 @@ class Cerebro(private val ctx: Context) {
         if (m != null) {
             val q = f.originalDeGrupo(m, 1).replace(Regex("^(?i)(el|la|los|las|un|una)\\s+(video|cancion|tema)\\s+(de\\s+)?"), "")
             return when (m.groupValues[2]) {
-                "youtube", "you tube" -> youtube(q, cb)
+                "youtube", "you tube" -> youtube(q, cb, MisApps.youtube(ctx))
                 "tiktok", "tik tok" -> { abrirUrl("https://www.tiktok.com/search?q=" + Uri.encode(q)); R("Buscando $q en TikTok, $tr.") }
                 "facebook" -> {
                     if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
@@ -905,6 +910,13 @@ class Cerebro(private val ctx: Context) {
                 "twitter", "x" -> { abrirUrl("https://x.com/search?q=" + Uri.encode(q)); R("Buscando $q en X, $tr.") }
                 else -> { buscarWeb(q); R("Buscando $q en Google, $tr.") }
             }
+        }
+        // "pon X en <cualquier app suya>" → por su nombre propio o el nombre de la app instalada
+        Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|busca(?:me)?|buscar|quiero ver|quiero escuchar|muestrame|ver|mira|escuchar)\\s+(.+?)\\s+en\\s+(?:la app |la aplicacion |el |mi )?([^\\s].{1,30})$").find(t)?.let { m3 ->
+            if (Regex("^(una|un)\\s+(alarma|temporizador|recordatorio)").containsMatchIn(m3.groupValues[1])) return@let
+            val app = MisApps.buscarApp(ctx, m3.groupValues[2]) ?: return@let
+            val q = f.originalDeGrupo(m3, 1).replace(Regex("^(?i)(el|la|los|las|un|una)\\s+(video|cancion|tema)\\s+(de\\s+)?"), "")
+            return reproducirEn(app.paquete, q, cb)
         }
         // "pon / reproduce X" sin sitio → la app elegida en «Mis apps» (música o videos)
         Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|quiero ver|quiero escuchar|escuchar|ver)\\s+(?:(?:el|un) video de\\s+|(?:la|una) cancion de\\s+|la cancion\\s+|el video\\s+|el tema\\s+|(?:algo de |una )?musica de\\s+|(?:una )?musica\\s+)?(.+)$").find(t)?.let { m2 ->
@@ -941,11 +953,32 @@ class Cerebro(private val ctx: Context) {
             abrirUrl("https://www.facebook.com/search/videos/?q=" + Uri.encode(q))
             R("Le muestro los videos de $q en Facebook, $tr.", cerrar = true)
         }
-        else -> youtube(q, cb)
+        null -> youtube(q, cb, MisApps.youtube(ctx))
+        else -> if (MisApps.esYoutube(ctx, pkg)) youtube(q, cb, pkg) else reproducirEnOtra(pkg, q)
+    }
+
+    /** Cualquier otra app del usuario: le pide que busque/reproduzca; si no sabe, la abre con la búsqueda copiada. */
+    private fun reproducirEnOtra(pkg: String, q: String): Yarvis.Respuesta {
+        val nombre = MisApps.nombreDe(ctx, pkg)
+        val intentos = listOf(
+            Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).setPackage(pkg)
+                .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*").putExtra(SearchManager.QUERY, q),
+            Intent(Intent.ACTION_SEARCH).setPackage(pkg).putExtra(SearchManager.QUERY, q),
+            Intent(Intent.ACTION_WEB_SEARCH).setPackage(pkg).putExtra(SearchManager.QUERY, q)
+        )
+        if (intentos.any { lanzar(it) }) return R("Buscando $q en $nombre, $tr.", cerrar = true)
+        try {
+            ctx.getSystemService(android.content.ClipboardManager::class.java)
+                .setPrimaryClip(android.content.ClipData.newPlainText("ODÍN", q))
+        } catch (_: Exception) {}
+        val i = ctx.packageManager.getLaunchIntentForPackage(pkg)
+        return if (i != null && lanzar(i)) R("Abrí $nombre, $tr. Le dejé copiado «$q»: mantenga presionado el buscador y pegue.", cerrar = true)
+        else R("No pude abrir $nombre, $tr.")
     }
 
     /** Busca el primer video en YouTube y lo reproduce directamente. */
-    private fun youtube(q: String, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta = fondo(cb) {
+    private fun youtube(q: String, cb: (Yarvis.Respuesta) -> Unit, pkg: String? = MisApps.youtube(ctx)): Yarvis.Respuesta = fondo(cb) {
+        val yt = pkg ?: "com.google.android.youtube"
         val id = try {
             val c = URL("https://www.youtube.com/results?sp=EgIQAQ%253D%253D&search_query=" + Uri.encode(q)).openConnection() as HttpURLConnection
             c.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -963,14 +996,20 @@ class Cerebro(private val ctx: Context) {
         }
         if (id != null) {
             if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
-            val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$id")).setPackage("com.google.android.youtube")
+            val app = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$id")).setPackage(yt)
                 .putExtra("force_fullscreen", false).putExtra("finish_on_ended", true)
-            principal.post { if (!lanzar(app)) abrirUrl("https://www.youtube.com/watch?v=$id") }
+            principal.post {
+                // 1) su app de YouTube  2) cualquier app que abra videos de YouTube  3) recién el navegador
+                if (!lanzar(app) && !lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$id")).setPackage(yt)) &&
+                    !lanzarSinNavegador(Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$id"))))
+                    abrirUrl("https://www.youtube.com/watch?v=$id")
+            }
             R("Reproduciendo $q en YouTube, $tr.")
         } else {
             principal.post {
-                val i = Intent(Intent.ACTION_SEARCH).setPackage("com.google.android.youtube").putExtra("query", q)
-                if (!lanzar(i)) abrirUrl("https://www.youtube.com/results?search_query=" + Uri.encode(q))
+                val i = Intent(Intent.ACTION_SEARCH).setPackage(yt).putExtra("query", q)
+                val i2 = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q))).setPackage(yt)
+                if (!lanzar(i) && !lanzar(i2)) abrirUrl("https://www.youtube.com/results?search_query=" + Uri.encode(q))
             }
             R("Buscando $q en YouTube, $tr.")
         }
@@ -1136,6 +1175,15 @@ class Cerebro(private val ctx: Context) {
     }
 
     private fun abrirUrl(url: String) = lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+
+    /** Abre el intent solo si lo atiende una app que no sea un navegador. */
+    private fun lanzarSinNavegador(i: Intent): Boolean {
+        val pm = ctx.packageManager
+        val navegadores = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")), 0)
+            .map { it.activityInfo.packageName }.toSet()
+        val app = pm.queryIntentActivities(i, 0).map { it.activityInfo.packageName }.firstOrNull { it !in navegadores } ?: return false
+        return lanzar(Intent(i).setPackage(app))
+    }
 
     fun lanzar(i: Intent): Boolean = try {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

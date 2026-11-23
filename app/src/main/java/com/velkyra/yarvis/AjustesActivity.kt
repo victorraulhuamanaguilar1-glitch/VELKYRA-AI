@@ -215,15 +215,15 @@ class AjustesActivity : Base() {
 
         // MIS APPS
         val apps = seccion("Mis apps")
-        apps.addView(texto("Elija qué app uso para cada cosa. Por ejemplo, si elige YouTube para música, «pon música de Shakira» siempre se abrirá ahí.", 14f, Ui.TEXTO_SUAVE))
+        apps.addView(texto("Elija qué app uso para cada cosa: cualquiera de las que tiene instaladas (toque «+ Otra app…»). Por ejemplo, si elige YouTube para música, «pon música de Shakira» siempre se abrirá ahí. También puede decir «pon … en» el nombre de cualquier app suya.", 14f, Ui.TEXTO_SUAVE))
         for (cat in MisApps.CATEGORIAS) {
-            val instaladas = cat.opciones.filter { MisApps.instalada(this, it.paquete) }.distinctBy { it.nombre }
-            if (instaladas.isEmpty()) continue
+            val instaladas = MisApps.opcionesDe(this, cat.id)
             apps.agregar(texto(cat.titulo, 14f, Ui.CIAN_CLARO, Ui.fuerte), arriba = dp(10))
             val fila = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
             val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             val actual = MisApps.elegida(this, cat.id)
             for (o in instaladas) chips.addView(chip(o.nombre, o.paquete == actual) { MisApps.elegir(this, cat.id, o.paquete); dibujar() }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            chips.addView(chip("+ Otra app…") { elegirOtraApp(cat.id, cat.titulo) }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
             fila.addView(chips)
             apps.agregar(fila, arriba = dp(4))
         }
@@ -319,6 +319,15 @@ class AjustesActivity : Base() {
                 }
             }
             .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun elegirOtraApp(categoria: String, titulo: String) {
+        val apps = MisApps.instaladas(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("App para $titulo")
+            .setItems(apps.map { it.nombre }.toTypedArray()) { _, i -> MisApps.elegir(this, categoria, apps[i].paquete); dibujar() }
+            .setNegativeButton("Cerrar", null)
             .show()
     }
 
