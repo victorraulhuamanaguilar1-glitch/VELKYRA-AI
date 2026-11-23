@@ -119,6 +119,11 @@ class ServicioNotificaciones : NotificationListenerService() {
             while (respondibles.size > 30) respondibles.removeFirst()
         }
 
+        // Chat asistido: ODÍN propone una respuesta y pregunta antes de enviarla
+        if (esMensaje && responder != null && ChatAsistido.coincide(tituloLimpio)) {
+            ChatAsistido.mensajeRecibido(tituloLimpio, app, texto.take(400))
+            return
+        }
         if (!Prefs.leerMensajes || !puedeHablar()) return
         val frase = if (esMensaje) "${Prefs.trato.replaceFirstChar { it.uppercase() }}, mensaje de $tituloLimpio por $app: ${texto.take(220)}"
         else "Notificación de $app: $tituloLimpio. ${texto.take(160)}"
@@ -168,6 +173,25 @@ class ServicioAccesibilidad : AccessibilityService() {
         fun prepararLlamadaWhatsapp() { llamarHasta = System.currentTimeMillis() + 20_000 }
         fun prepararReproduccion() { reproducirHasta = System.currentTimeMillis() + 12_000 }
 
+        // Publicación: pegar el texto y tocar «Publicar» en la app elegida
+        @Volatile private var publicarHasta = 0L
+        @Volatile private var publicarPaquete = ""
+        @Volatile private var publicarTexto = ""
+        @Volatile private var publicarEstado = false   // WhatsApp: primero tocar «Mi estado»
+        @Volatile private var textoPuesto = false
+        @Volatile private var estadoTocado = false
+        @Volatile private var autoPublicar = true
+
+        fun prepararPublicacion(paquete: String, texto: String, estadoWhatsapp: Boolean, tocarPublicar: Boolean) {
+            publicarPaquete = paquete
+            publicarTexto = texto
+            publicarEstado = estadoWhatsapp
+            autoPublicar = tocarPublicar
+            textoPuesto = false
+            estadoTocado = false
+            publicarHasta = System.currentTimeMillis() + 30_000
+        }
+
         fun accion(a: Int): Boolean = instancia?.performGlobalAction(a) ?: false
 
         fun permisoConcedido(ctx: Context): Boolean {
@@ -181,9 +205,13 @@ class ServicioAccesibilidad : AccessibilityService() {
 
     override fun onAccessibilityEvent(e: AccessibilityEvent?) {
         val ahora = System.currentTimeMillis()
-        if (ahora > enviarHasta && ahora > llamarHasta && ahora > reproducirHasta) return
+        if (ahora > enviarHasta && ahora > llamarHasta && ahora > reproducirHasta && ahora > publicarHasta) return
         val pkg = e?.packageName?.toString() ?: return
         val raiz = rootInActiveWindow ?: return
+        if (ahora < publicarHasta && pkg == publicarPaquete) {
+            publicar(raiz)
+            return
+        }
         if (pkg.startsWith("com.whatsapp")) {
             if (ahora < enviarHasta) {
                 val boton = raiz.findAccessibilityNodeInfosByViewId("$pkg:id/send").firstOrNull { it.isEnabled }
@@ -208,6 +236,67 @@ class ServicioAccesibilidad : AccessibilityService() {
         for (i in 0 until n.childCount) {
             val h = n.getChild(i) ?: continue
             buscarPorDescripcion(h, textos, profundidad + 1, parcial)?.let { return it }
+        }
+        return null
+    }
+
+    private fun publicar(raiz: AccessibilityNodeInfo) {
+        // 1) WhatsApp: elegir «Mi estado» en la lista de destinatarios
+        if (publicarEstado && !estadoTocado) {
+            val estado = buscarPorTexto(raiz, listOf("mi estado", "my status", "estado"))
+            if (estado != null && clicEnElOPadre(estado)) estadoTocado = true
+            return
+        }
+        // 2) Escribir el texto en el cuadro de la publicación
+        if (!textoPuesto) {
+            val campo = buscarEditable(raiz)
+            if (campo != null) {
+                val args = android.os.Bundle()
+                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, publicarTexto)
+                if (campo.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) textoPuesto = true
+            }
+            if (!textoPuesto && publicarEstado) textoPuesto = true // en estados el texto ya viene en el mensaje compartido
+            return
+        }
+        // 3) Tocar «Publicar» / «Postear» / «Enviar»
+        if (!autoPublicar) { publicarHasta = 0; return }
+        val boton = buscarPorTexto(raiz, listOf("publicar", "postear", "post", "compartir", "share", "enviar", "send", "siguiente", "next"), exacto = true)
+            ?: buscarPorDescripcion(raiz, listOf("enviar", "send", "publicar", "post"), parcial = true)
+        if (boton != null && clicEnElOPadre(boton)) {
+            val t = (boton.text ?: boton.contentDescription)?.toString()?.lowercase().orEmpty()
+            // «Siguiente» lleva a otra pantalla donde está «Publicar»: se sigue intentando
+            if (!t.startsWith("siguiente") && !t.startsWith("next")) publicarHasta = 0
+        }
+    }
+
+    private fun clicEnElOPadre(n: AccessibilityNodeInfo): Boolean {
+        var x: AccessibilityNodeInfo? = n
+        var i = 0
+        while (x != null && i < 5) {
+            if (x.isClickable && x.isEnabled) return x.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            x = x.parent
+            i++
+        }
+        return false
+    }
+
+    private fun buscarEditable(n: AccessibilityNodeInfo, profundidad: Int = 0): AccessibilityNodeInfo? {
+        if (profundidad > 30) return null
+        if (n.isEditable && n.isEnabled) return n
+        for (i in 0 until n.childCount) {
+            val h = n.getChild(i) ?: continue
+            buscarEditable(h, profundidad + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun buscarPorTexto(n: AccessibilityNodeInfo, textos: List<String>, profundidad: Int = 0, exacto: Boolean = false): AccessibilityNodeInfo? {
+        if (profundidad > 30) return null
+        val t = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase().orEmpty()
+        if (t.isNotEmpty() && textos.any { if (exacto) t == it else t.startsWith(it) }) return n
+        for (i in 0 until n.childCount) {
+            val h = n.getChild(i) ?: continue
+            buscarPorTexto(h, textos, profundidad + 1, exacto)?.let { return it }
         }
         return null
     }

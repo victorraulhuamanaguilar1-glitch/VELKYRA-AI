@@ -54,6 +54,23 @@ class Cerebro(private val ctx: Context) {
     private var pendiente: ((Frase) -> Yarvis.Respuesta?)? = null
     private var pendienteHasta = 0L
 
+    private fun confirmarPublicacion(red: Publicar.Red, texto: String): Yarvis.Respuesta {
+        val limpio = texto.trim().replaceFirstChar { it.uppercase() }
+        return esperar("Voy a publicar en ${red.nombre}: «$limpio». ¿Lo publico, $tr?") { f2 ->
+            val t2 = f2.t
+            val cambio = Regex("^(?:no,? )?(?:mejor|cambialo|cambia|pon|escribe)(?: que| por| a)?\\s+(.+)$").find(t2)
+            when {
+                cambio != null -> confirmarPublicacion(red, f2.originalDeGrupo(cambio, 1))
+                Regex("^(si|sip|claro|dale|ok|okay|publicalo|publica|hazlo|de acuerdo|correcto|listo|perfecto)\\b").containsMatchIn(t2) ->
+                    R(Publicar.ejecutar(ctx, red, limpio), cerrar = true)
+                else -> R("Entendido, $tr. No publico nada.", cerrar = true)
+            }
+        }
+    }
+
+    /** Pregunta algo al usuario y procesa su próxima respuesta con [siguiente] (para diálogos que inicia ODÍN). */
+    fun preguntarAlUsuario(pregunta: String, siguiente: (Frase) -> Yarvis.Respuesta?): Yarvis.Respuesta = esperar(pregunta, siguiente)
+
     private fun esperar(pregunta: String, siguiente: (Frase) -> Yarvis.Respuesta?): Yarvis.Respuesta {
         pendiente = siguiente
         pendienteHasta = System.currentTimeMillis() + 90_000
@@ -82,7 +99,7 @@ class Cerebro(private val ctx: Context) {
         return t.ifBlank { texto }
     }
 
-    private val rAccion = Regex("(llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa)")
+    private val rAccion = Regex("(public|postea|chatea|estado|llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa)")
 
     fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
         val limpio = limpiarOrden(texto)
@@ -220,6 +237,47 @@ class Cerebro(private val ctx: Context) {
             return R(if (h != null) "Usted es $h. Su voz está registrada y mi dueño le autorizó a darme órdenes."
             else if (VozDueno.hayDueno()) "Usted es mi dueño${Prefs.nombre.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""}. Reconozco su voz perfectamente."
             else "Usted es ${Prefs.nombre.ifBlank { "mi dueño" }}. Aunque aún no he aprendido su voz; si lo desea, diga «aprende mi voz».")
+        }
+
+        // --- Chats automáticos ----------------------------------------------------
+        Regex("^(?:deja de chatear|termina el chat|ya no chatees|desactiva el chat|para el chat|deja de atender los mensajes|deja de responder)(?: automatico)?(?:\\s+(?:con|de|a)\\s+(.+))?$").find(t)?.let { m ->
+            val quien = m.groupValues[1].takeIf { it.isNotBlank() }
+            ChatAsistido.detener(quien)
+            return R(if (quien == null) "Listo, $tr. Ya no respondo ningún chat por usted." else "Listo, $tr. Ya no respondo a ${f.originalDeGrupo(m, 1)}.")
+        }
+        Regex("^(?:chatea|conversa|habla|atiende el chat|atiende los mensajes|responde por mi|contesta por mi|encargate del chat|encargate de los mensajes|responde automaticamente|contesta automaticamente)(?: automaticamente)?(?: por mi)?(?: con| de| a)?\\s+(.+?)(?:\\s+por\\s+(?:whatsapp|wasap|messenger|telegram|mensaje))?(?:\\s+(?:automaticamente|por mi|solo))?(?:\\s+(?:y|pero)\\s+(preguntame|consultame)(?: antes)?)?(?:\\s+(?:durante|por)\\s+(\\d+)\\s*(minutos?|horas?))?$").find(t)?.let { m ->
+            if (!esDueno) return R("Solo mi dueño puede pedirme eso, $tr.")
+            if (!ServicioNotificaciones.activo) {
+                lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                return R("Para atender sus chats necesito acceso a sus notificaciones, $tr. Active ODÍN en la pantalla que le abrí.", cerrar = true)
+            }
+            val nombre = f.originalDeGrupo(m, 1).replace(Regex("(?i)^(a |al |la |el |mi )"), "").trim()
+            val preguntar = m.groupValues[2].isNotBlank() || f.tiene("(preguntame|consultame)")
+            val n = m.groupValues[3].toIntOrNull()
+            val minutos = if (n == null) 180 else if (m.groupValues[4].startsWith("hora")) n * 60 else n
+            val c = ChatAsistido.iniciar(nombre, minutos, automatico = !preguntar)
+            val estilo = if (c.guia.isNotBlank()) " imitando su forma de escribir" else ""
+            return R(if (preguntar) "De acuerdo, $tr. Cuando $nombre le escriba, le leeré el mensaje y le propondré una respuesta antes de enviarla."
+            else "De acuerdo, $tr. Responderé a $nombre por usted$estilo. Si me escribe de dinero, citas o algo delicado, se lo consultaré primero. Para detenerme, diga «deja de chatear con $nombre».")
+        }
+
+        // --- Publicaciones en redes -------------------------------------------------
+        val rRed = "(facebook|face|feis|whatsapp|wasap|estado de whatsapp|estados|estado|mi estado|instagram|insta|tiktok|tik tok|twitter|x|telegram)"
+        (Regex("^(?:publica|postea|sube|comparte|haz una publicacion|haz un post|pon un estado|publicar|escribe una publicacion|escribe un post)(?:\\s+(?:esto|un estado|una publicacion|un post|un mensaje))?\\s+(?:en|a)\\s+(?:mi\\s+)?$rRed(?:\\s+(que diga|que dice|diciendo|con el texto|que|sobre|acerca de|de))?\\s*(.*)$").find(t)
+            ?.let { m -> Triple(m.groupValues[1], m.groupValues[2], m.groups[3]?.let { g -> if (g.value.isBlank()) "" else f.originalEntre(g.range.first) }.orEmpty().let { c -> if (m.groupValues[3].isBlank() || Regex("^\\S+:").containsMatchIn(c) && !m.groupValues[3].contains(":")) c.replace(Regex("^\\S*:\\s*"), "") else c }) }
+            ?: Regex("^(?:publica|postea|sube|comparte)\\s+(?:que\\s+)?(.+?)\\s+en\\s+(?:mi\\s+)?$rRed$").find(t)
+                ?.let { m -> Triple(m.groupValues[2], "", f.originalDeGrupo(m, 1)) })?.let { (redDicha, conector, contenido) ->
+            if (!esDueno) return R("Solo mi dueño puede publicar en sus redes, $tr.")
+            val red = Publicar.red(redDicha) ?: return null
+            val sobreTema = conector == "sobre" || conector == "acerca de" || conector == "de"
+            return when {
+                contenido.isBlank() -> esperar("¿Qué desea publicar en ${red.nombre}, $tr?") { f2 -> confirmarPublicacion(red, f2.original.trim()) }
+                sobreTema -> fondo(cb) {
+                    val texto = Publicar.redactar(red, contenido) ?: return@fondo R("No pude redactar la publicación ahora, $tr. Dígame el texto exacto y lo publico.")
+                    confirmarPublicacion(red, texto)
+                }
+                else -> confirmarPublicacion(red, contenido)
+            }
         }
 
         // --- Personalidad ------------------------------------------------------
@@ -537,7 +595,9 @@ class Cerebro(private val ctx: Context) {
         // --- Mapas -------------------------------------------------------------
         Regex("(?:como llego a|como llegar a|llevame a|navega a|navegar a|ruta (?:a|hacia|para)|direcciones (?:a|para)|vamos a)\\s+(.+)$").find(t)?.let { m ->
             val lugar = f.originalDeGrupo(m, 1)
-            if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(lugar)))))
+            val porWaze = MisApps.elegida(ctx, "mapas") == "com.waze" &&
+                lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("https://waze.com/ul?q=" + Uri.encode(lugar) + "&navigate=yes")).setPackage("com.waze"))
+            if (!porWaze && !lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(lugar)))))
                 abrirUrl("https://www.google.com/maps/dir/?api=1&destination=" + Uri.encode(lugar))
             return R("Trazando la ruta hacia $lugar, $tr.")
         }
@@ -778,7 +838,8 @@ class Cerebro(private val ctx: Context) {
         val url = "https://api.whatsapp.com/send?phone=${Contactos.internacional(numero)}&text=" + Uri.encode(texto)
         val auto = Prefs.whatsappAutomatico && ServicioAccesibilidad.activo
         if (auto) ServicioAccesibilidad.prepararEnvio()
-        val abierto = listOf("com.whatsapp", "com.whatsapp.w4b", null).any { pkg ->
+        val preferida = MisApps.elegida(ctx, "mensajes")
+        val abierto = (listOfNotNull(preferida) + listOf("com.whatsapp", "com.whatsapp.w4b")).distinct().plus(listOf<String?>(null)).any { pkg ->
             lanzar(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { if (pkg != null) setPackage(pkg) })
         }
         if (!abierto) return R("No encontré WhatsApp en este celular, $tr.")
@@ -845,13 +906,42 @@ class Cerebro(private val ctx: Context) {
                 else -> { buscarWeb(q); R("Buscando $q en Google, $tr.") }
             }
         }
-        // "pon / reproduce X" sin sitio → YouTube
-        Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|quiero ver|quiero escuchar)\\s+(?:el video de\\s+|la cancion de\\s+|la cancion\\s+|el video\\s+|el tema\\s+|musica de\\s+)?(.+)$").find(t)?.let { m2 ->
+        // "pon / reproduce X" sin sitio → la app elegida en «Mis apps» (música o videos)
+        Regex("^(?:pon(?:me)?|reproduce|reproducir|toca|quiero ver|quiero escuchar|escuchar|ver)\\s+(?:(?:el|un) video de\\s+|(?:la|una) cancion de\\s+|la cancion\\s+|el video\\s+|el tema\\s+|(?:algo de |una )?musica de\\s+|(?:una )?musica\\s+)?(.+)$").find(t)?.let { m2 ->
             val q = f.originalDeGrupo(m2, 1)
             if (Regex("^(una|un)\\s+(alarma|temporizador|recordatorio)").containsMatchIn(m2.groupValues[1])) return null
-            return youtube(q, cb)
+            val esMusica = Regex("(musica|cancion|tema|escuchar|toca|album|canciones)").containsMatchIn(t)
+            return reproducirEn(MisApps.elegida(ctx, if (esMusica) "musica" else "videos"), q, cb)
         }
         return null
+    }
+
+    /** Reproduce en la app elegida por el usuario. */
+    private fun reproducirEn(pkg: String?, q: String, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta = when (pkg) {
+        "com.google.android.apps.youtube.music" -> {
+            if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
+            if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=" + Uri.encode(q))).setPackage(pkg))) youtube(q, cb)
+            else R("Buscando $q en YouTube Music, $tr.", cerrar = true)
+        }
+        "com.spotify.music" -> {
+            lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(q))).setPackage(pkg))
+            R("Buscando $q en Spotify, $tr.", cerrar = true)
+        }
+        "deezer.android.app" -> {
+            lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("deezer://www.deezer.com/search/" + Uri.encode(q))).setPackage(pkg))
+            R("Buscando $q en Deezer, $tr.", cerrar = true)
+        }
+        "com.zhiliaoapp.musically", "com.ss.android.ugc.trill" -> {
+            if (!lanzar(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.tiktok.com/search?q=" + Uri.encode(q))).setPackage(pkg)))
+                abrirUrl("https://www.tiktok.com/search?q=" + Uri.encode(q))
+            R("Buscando $q en TikTok, $tr.", cerrar = true)
+        }
+        "com.facebook.katana" -> {
+            if (ServicioAccesibilidad.activo) ServicioAccesibilidad.prepararReproduccion()
+            abrirUrl("https://www.facebook.com/search/videos/?q=" + Uri.encode(q))
+            R("Le muestro los videos de $q en Facebook, $tr.", cerrar = true)
+        }
+        else -> youtube(q, cb)
     }
 
     /** Busca el primer video en YouTube y lo reproduce directamente. */
@@ -887,6 +977,10 @@ class Cerebro(private val ctx: Context) {
     }
 
     private fun abrirApp(nombre: String): Yarvis.Respuesta {
+        MisApps.buscarAlias(ctx, nombre)?.let { a ->
+            val i = ctx.packageManager.getLaunchIntentForPackage(a.paquete)
+            if (i != null && lanzar(i)) return R("Abriendo ${a.nombre}, $tr.", cerrar = true)
+        }
         val especiales = mapOf(
             "configuracion" to Settings.ACTION_SETTINGS, "ajustes" to Settings.ACTION_SETTINGS,
             "ajustes de yarvis" to "", "configuracion de yarvis" to ""

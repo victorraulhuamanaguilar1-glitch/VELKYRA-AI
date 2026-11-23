@@ -223,6 +223,26 @@ object Yarvis {
         Voz.hablar(texto) { if (miSesion == sesion) terminar() }
     }
 
+    /**
+     * ODÍN toma la iniciativa: dice algo y se queda escuchando la respuesta (por ejemplo, para confirmar
+     * el envío de un mensaje). Si está ocupado, lo intenta de nuevo en unos segundos.
+     */
+    fun decirYEscuchar(r: Respuesta, intento: Int = 0): Unit {
+        principal.post {
+            if (estado != Estado.REPOSO) {
+                if (intento < 24) principal.postDelayed({ decirYEscuchar(r, intento + 1) }, 5000)
+                return@post
+            }
+            val miSesion = ++sesion
+            hablanteActual = null
+            enConversacion = false
+            Oido.cancelar()
+            ServicioEscucha.pausar()
+            if (!pantallaVisible) VentanaFlotante.mostrar(ctx)
+            responder(r, miSesion)
+        }
+    }
+
     fun cancelar() = principal.post {
         sesion++
         Oido.cancelar()

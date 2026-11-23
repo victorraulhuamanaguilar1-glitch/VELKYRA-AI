@@ -117,6 +117,15 @@ object Prefs {
         get() = s("perfiles_voz", "[]")
         set(v) = ps("perfiles_voz", v)
 
+    /** Chat asistido: con quién (nombre tal como aparece en la notificación) y hasta cuándo. */
+    var chatCon: String
+        get() = s("chat_con", "")
+        set(v) = ps("chat_con", v)
+
+    var chatHasta: Long
+        get() = sp.getLong("chat_hasta", 0L)
+        set(v) = sp.edit().putLong("chat_hasta", v).apply()
+
     /** Segundos que espera en silencio antes de cerrar la conversación. */
     var esperaConversacion: Int
         get() = sp.getInt("espera_conversacion", 30)

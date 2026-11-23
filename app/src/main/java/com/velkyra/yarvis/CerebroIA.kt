@@ -231,6 +231,11 @@ object CerebroIA {
         toma una foto
         pausa la música
         siguiente canción
+        publica en RED que TEXTO          (RED: facebook, estado de whatsapp, x, telegram, instagram, tiktok)
+        publica en RED sobre TEMA
+        chatea con NOMBRE por mí
+        chatea con NOMBRE y pregúntame
+        deja de chatear con NOMBRE
         Si el usuario NO está pidiendo una acción del celular (es una pregunta, conversación o petición de información),
         responde exactamente: NINGUNA
         Responde solo con la orden, sin comillas ni explicación.

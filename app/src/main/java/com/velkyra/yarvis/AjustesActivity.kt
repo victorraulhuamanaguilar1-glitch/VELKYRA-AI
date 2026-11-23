@@ -190,6 +190,53 @@ class AjustesActivity : Base() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
 
+        // CHATS AUTOMÁTICOS
+        val ch = seccion("Chats automáticos")
+        ch.addView(texto("ODÍN responde por usted los chats que elija (WhatsApp, Messenger, Telegram), imitando su forma de escribir. Los temas de dinero, citas o emergencias siempre se los consulta.", 14f, Ui.TEXTO_SUAVE))
+        val lista = ChatAsistido.chats()
+        if (lista.isEmpty()) ch.agregar(texto("Ningún chat todavía. También puede decir: «Odín, chatea con Juan por mí».", 14f, Ui.TEXTO_SUAVE), arriba = dp(8))
+        for (c in lista) {
+            val fila = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = Ui.panel(this@AjustesActivity, 12f, Ui.PANEL_FUERTE, Ui.BORDE); setPadding(dp(14), dp(10), dp(14), dp(10)) }
+            fila.addView(texto(c.nombre, 17f, Ui.TEXTO, Ui.fuerte))
+            val hasta = java.text.SimpleDateFormat("h:mm a", java.util.Locale.forLanguageTag("es-PE")).format(java.util.Date(c.hasta))
+            fila.addView(texto((if (c.activo) "● Activo hasta las $hasta" else "○ Inactivo") + " · " + (if (c.automatico) "responde solo" else "me pregunta antes") +
+                (if (c.guia.isNotBlank()) " · con guía de estilo" else " · sin guía de estilo"), 13f, if (c.activo) Ui.VERDE else Ui.TEXTO_SUAVE))
+            val botones = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            botones.addView(chip(if (c.activo) "Detener" else "Activar 3 h") {
+                if (c.activo) ChatAsistido.detener(c.nombre) else ChatAsistido.guardar(c.copy(hasta = System.currentTimeMillis() + 3 * 3_600_000L))
+                dibujar()
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            botones.addView(chip("Editar") { editarChat(c) }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            botones.addView(chip("Quitar") { ChatAsistido.quitar(c.nombre); dibujar() })
+            fila.agregar(botones, arriba = dp(8))
+            ch.agregar(fila, arriba = dp(8))
+        }
+        ch.agregar(boton("AGREGAR CHAT", false) { editarChat(null) }, arriba = dp(10))
+
+        // MIS APPS
+        val apps = seccion("Mis apps")
+        apps.addView(texto("Elija qué app uso para cada cosa. Por ejemplo, si elige YouTube para música, «pon música de Shakira» siempre se abrirá ahí.", 14f, Ui.TEXTO_SUAVE))
+        for (cat in MisApps.CATEGORIAS) {
+            val instaladas = cat.opciones.filter { MisApps.instalada(this, it.paquete) }.distinctBy { it.nombre }
+            if (instaladas.isEmpty()) continue
+            apps.agregar(texto(cat.titulo, 14f, Ui.CIAN_CLARO, Ui.fuerte), arriba = dp(10))
+            val fila = android.widget.HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+            val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            val actual = MisApps.elegida(this, cat.id)
+            for (o in instaladas) chips.addView(chip(o.nombre, o.paquete == actual) { MisApps.elegir(this, cat.id, o.paquete); dibujar() }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            fila.addView(chips)
+            apps.agregar(fila, arriba = dp(4))
+        }
+        apps.agregar(texto("Apps con nombre propio", 14f, Ui.CIAN_CLARO, Ui.fuerte), arriba = dp(14))
+        for (a in MisApps.alias(this)) {
+            val fila = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            fila.agregar(texto("«${a.nombre}» → ${a.etiqueta}", 16f, Ui.TEXTO), ancho = 0, peso = 1f)
+            fila.addView(texto("Quitar", 15f, Ui.ROJO, Ui.fuerte).apply { setPadding(dp(12), dp(8), 0, dp(8)); setOnClickListener { MisApps.quitarAlias(this@AjustesActivity, a.nombre); dibujar() } })
+            apps.agregar(fila, arriba = dp(4))
+        }
+        apps.agregar(texto("Ejemplo: llame «mi banco» a la app de su banco y diga «Odín, abre mi banco».", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        apps.agregar(boton("AGREGAR APP CON NOMBRE PROPIO", false) { agregarAlias() }, arriba = dp(10))
+
         // PERMISOS
         val per = seccion("Permisos")
         per.addView(texto("Revise y conceda todos los permisos que ODÍN necesita.", 15f, Ui.TEXTO))
@@ -233,6 +280,68 @@ class AjustesActivity : Base() {
     override fun onPause() {
         ServicioEscucha.alOir = null
         super.onPause()
+    }
+
+    private fun editarChat(c: ChatAsistido.Chat?) {
+        val pad = dp(18)
+        val caja = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad / 2, pad, 0) }
+        caja.addView(texto("Nombre del contacto (tal como aparece en WhatsApp)", 13f, Ui.TEXTO_SUAVE))
+        val cNombre = campo("Ejemplo: Juan", c?.nombre ?: "")
+        caja.agregar(cNombre, arriba = dp(4))
+        var automatico = c?.automatico ?: true
+        caja.agregar(interruptor("Responder solo", "Si lo apaga, le propondré la respuesta y la enviaré solo si me dice que sí.", automatico) { automatico = it }, arriba = dp(6))
+        caja.agregar(texto("Guía de estilo: pegue aquí un trozo real de su chat con esa persona (mientras más largo, mejor imito cómo escribe usted).", 13f, Ui.TEXTO_SUAVE), arriba = dp(8))
+        caja.agregar(texto("En WhatsApp: abra el chat → ⋮ → Más → Exportar chat → Sin archivos, y copie una parte. O mantenga presionados varios mensajes y cópielos.", 12f, Ui.TEXTO_SUAVE), arriba = dp(2))
+        val cGuia = android.widget.EditText(this).apply {
+            setText(c?.guia ?: "")
+            hint = "Pegue aquí la conversación…"
+            minLines = 5
+            maxLines = 10
+            gravity = android.view.Gravity.TOP
+            textSize = 14f
+            setTextColor(Ui.TEXTO)
+            setHintTextColor(Ui.TEXTO_SUAVE)
+            background = Ui.panel(this@AjustesActivity, 12f, Ui.PANEL_FUERTE, Ui.BORDE)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        caja.agregar(cGuia, arriba = dp(6))
+        val scroll = android.widget.ScrollView(this).apply { addView(caja) }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(if (c == null) "Nuevo chat automático" else "Editar chat")
+            .setView(scroll)
+            .setPositiveButton("Guardar y activar") { _, _ ->
+                val n = cNombre.text.toString().trim()
+                if (n.isNotBlank()) {
+                    if (c != null && c.nombre != n) ChatAsistido.quitar(c.nombre)
+                    ChatAsistido.guardar(ChatAsistido.Chat(n, automatico, cGuia.text.toString().take(20000), System.currentTimeMillis() + 3 * 3_600_000L))
+                    dibujar()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun agregarAlias() {
+        val apps = MisApps.instaladas(this)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle("Elija la app")
+            .setItems(apps.map { it.nombre }.toTypedArray()) { _, i ->
+                val app = apps[i]
+                val cNombre = campo("Ejemplo: mi banco")
+                val caja = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(8), dp(18), 0); addView(cNombre) }
+                AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                    .setTitle("¿Cómo llamará a ${app.nombre}?")
+                    .setView(caja)
+                    .setPositiveButton("Guardar") { _, _ ->
+                        val n = cNombre.text.toString().trim()
+                        if (n.isNotBlank()) { MisApps.agregarAlias(this, n, app.paquete, app.nombre); dibujar() }
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
     }
 
     private fun elegirVoz() {
