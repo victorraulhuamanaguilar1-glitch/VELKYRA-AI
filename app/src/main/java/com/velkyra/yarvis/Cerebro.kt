@@ -247,7 +247,7 @@ class Cerebro(private val ctx: Context) {
         }
         Regex("^(?:chatea|conversa|habla|atiende el chat|atiende los mensajes|responde por mi|contesta por mi|encargate del chat|encargate de los mensajes|responde automaticamente|contesta automaticamente)(?: automaticamente)?(?: por mi)?(?: con| de| a)?\\s+(.+?)(?:\\s+por\\s+(?:whatsapp|wasap|messenger|telegram|mensaje))?(?:\\s+(?:automaticamente|por mi|solo))?(?:\\s+(?:y|pero)\\s+(preguntame|consultame)(?: antes)?)?(?:\\s+(?:durante|por)\\s+(\\d+)\\s*(minutos?|horas?))?$").find(t)?.let { m ->
             if (!esDueno) return R("Solo mi dueño puede pedirme eso, $tr.")
-            if (!ServicioNotificaciones.activo) {
+            if (!ServicioNotificaciones.listo(ctx)) {
                 lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 return R("Para atender sus chats necesito acceso a sus notificaciones, $tr. Active ODÍN en la pantalla que le abrí.", cerrar = true)
             }
@@ -760,7 +760,7 @@ class Cerebro(private val ctx: Context) {
             texto = if (resto.isBlank()) "" else f.originalEntre(t.length - resto.length + (q?.range?.last?.plus(1) ?: 0))
         }
         texto = texto.trim().trim('"', '«', '»')
-        if (!ServicioNotificaciones.activo) {
+        if (!ServicioNotificaciones.listo(ctx)) {
             lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             return R("Para responder mensajes necesito acceso a sus notificaciones, $tr. Active ODÍN en la pantalla que le abrí.", cerrar = true)
         }
@@ -853,7 +853,7 @@ class Cerebro(private val ctx: Context) {
     }
 
     private fun leerNotificaciones(): Yarvis.Respuesta {
-        if (!ServicioNotificaciones.activo) {
+        if (!ServicioNotificaciones.listo(ctx)) {
             lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
             return R("Necesito acceso a sus notificaciones para leerlas, $tr. Active ODÍN en la pantalla que le abrí.")
         }

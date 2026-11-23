@@ -178,6 +178,7 @@ class ServicioEscucha : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
         })
         cargarModelo()
+        ServicioNotificaciones.reconectar(this)
     }
 
     private fun enPrimerPlano(): Boolean = try {

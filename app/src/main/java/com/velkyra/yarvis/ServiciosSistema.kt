@@ -65,11 +65,40 @@ class ServicioNotificaciones : NotificationListenerService() {
 
         fun permisoConcedido(ctx: Context): Boolean {
             val activos = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners").orEmpty()
-            return activos.contains(ComponentName(ctx, ServicioNotificaciones::class.java).flattenToString())
+            val c = ComponentName(ctx, ServicioNotificaciones::class.java)
+            return activos.contains(c.flattenToString()) || activos.contains(c.flattenToShortString())
+        }
+
+        /**
+         * El permiso está dado pero el sistema no conectó el lector (pasa en Xiaomi/MIUI y otras marcas
+         * después de instalar una actualización o cuando cierran la app). Lo vuelve a conectar.
+         */
+        fun reconectar(ctx: Context) {
+            if (activo || !permisoConcedido(ctx)) return
+            val c = ComponentName(ctx, ServicioNotificaciones::class.java)
+            try { NotificationListenerService.requestRebind(c) } catch (_: Exception) {}
+            try {
+                val pm = ctx.packageManager
+                pm.setComponentEnabledSetting(c, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+                pm.setComponentEnabledSetting(c, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+            } catch (_: Exception) {}
+            try { NotificationListenerService.requestRebind(c) } catch (_: Exception) {}
+        }
+
+        /** ¿Puedo trabajar con sus notificaciones? Si tiene el permiso, lo da por bueno y reconecta si hace falta. */
+        fun listo(ctx: Context): Boolean {
+            if (activo) return true
+            if (!permisoConcedido(ctx)) return false
+            reconectar(ctx)
+            return true
         }
     }
 
-    override fun onListenerConnected() { conectado = this }
+    override fun onListenerConnected() {
+        conectado = this
+        // Recupera los mensajes que ya estaban en la barra (sin anunciarlos), para poder responderlos
+        try { activeNotifications?.forEach { try { procesar(it, silencioso = true) } catch (_: Exception) {} } } catch (_: Exception) {}
+    }
     override fun onListenerDisconnected() { if (conectado === this) conectado = null }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -79,7 +108,7 @@ class ServicioNotificaciones : NotificationListenerService() {
         }
     }
 
-    private fun procesar(sbn: StatusBarNotification) {
+    private fun procesar(sbn: StatusBarNotification, silencioso: Boolean = false) {
         if (sbn.packageName == packageName || sbn.isOngoing) return
         val n = sbn.notification
         if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
@@ -119,6 +148,7 @@ class ServicioNotificaciones : NotificationListenerService() {
             while (respondibles.size > 30) respondibles.removeFirst()
         }
 
+        if (silencioso) return
         // Chat asistido: ODÍN propone una respuesta y pregunta antes de enviarla
         if (esMensaje && responder != null && ChatAsistido.coincide(tituloLimpio)) {
             ChatAsistido.mensajeRecibido(tituloLimpio, app, texto.take(400))
