@@ -36,7 +36,7 @@ class SplashActivity : Base() {
         }
         val nucleo = NucleoView(this)
         principal.addView(nucleo, LinearLayout.LayoutParams(dp(220), dp(220)))
-        principal.addView(texto("YARVIS", 40f, Ui.CIAN, Ui.titulo, 0.45f).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
+        principal.addView(texto("ODÍN", 40f, Ui.CIAN, Ui.titulo, 0.45f).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(18) })
         principal.addView(texto("ASISTENTE VIRTUAL INTELIGENTE", 12f, Ui.TEXTO_SUAVE, Ui.titulo, 0.3f).apply { gravity = Gravity.CENTER })
         capa.addView(principal, FrameLayout.LayoutParams(-1, -1))
 

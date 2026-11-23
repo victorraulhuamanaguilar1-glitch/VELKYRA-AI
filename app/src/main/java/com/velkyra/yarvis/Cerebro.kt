@@ -65,7 +65,7 @@ class Cerebro(private val ctx: Context) {
         var t = texto.trim().trimStart('¿', '¡', ',', '.', ' ')
         val prefijos = listOf(
             "(oye|hey|ey|hola)\\s*,?\\s+",
-            "(yarvis|jarvis|llarvis|harvis|${Regex.escape(Prefs.palabraActivacion)})\\s*[,.]?\\s*",
+            "(odin|odín|yarvis|jarvis|llarvis|harvis|${Regex.escape(Prefs.palabraActivacion)})\\s*[,.]?\\s*",
             "(por favor|porfa|porfavor)\\s*,?\\s+",
             "(puedes|podr[ií]as|me puedes|me podr[ií]as|quiero que|quisiera que|necesito que|deseo que|hazme el favor de|ay[uú]dame a|te pido que)\\s+",
             "(me\\s+)?(ayudas a|haces el favor de)\\s+"
@@ -169,7 +169,7 @@ class Cerebro(private val ctx: Context) {
         if (f.tiene("^(cancela|cancelar|olvidalo|olvida eso|nada|no nada|ninguna|dejalo|no importa)$")) {
             return R("Como desee, $tr.", cerrar = true)
         }
-        if (f.tiene("^(adios|hasta luego|hasta manana|chau|chao|nos vemos|eso es todo|eso seria todo|nada mas|es todo|descansa|apagate|termina|terminar|terminamos|cierra la conversacion|fin de la conversacion|ya esta|listo eso es todo|puedes retirarte|retirate|ya no|ya no necesito nada|buenas noches yarvis)\\b") ||
+        if (f.tiene("^(adios|hasta luego|hasta manana|chau|chao|nos vemos|eso es todo|eso seria todo|nada mas|es todo|descansa|apagate|termina|terminar|terminamos|cierra la conversacion|fin de la conversacion|ya esta|listo eso es todo|puedes retirarte|retirate|ya no|ya no necesito nada|buenas noches yarvis|buenas noches odin)\\b") ||
             f.tiene("(eso es todo|eso seria todo|nada mas|es todo|ya no necesito nada|termina la conversacion|cierra la conversacion)$")) {
             return R(listOf("A su servicio, $tr.", "Estaré aquí cuando me necesite, $tr.", "Que tenga un excelente día, $tr.").random(), cerrar = true)
         }
@@ -259,11 +259,11 @@ class Cerebro(private val ctx: Context) {
         }
 
         // --- Conversación ----------------------------------------------------
-        if (f.tiene("^(hola|hey|oye|buenas|buenos dias|buenas tardes|buenas noches|que tal|saludos)( yarvis)?$")) {
+        if (f.tiene("^(hola|hey|oye|buenas|buenos dias|buenas tardes|buenas noches|que tal|saludos)( yarvis| odin)?$")) {
             return R("${saludo()}, $tr. ¿En qué puedo ayudarle?", seguir = true)
         }
         if (f.tiene("(quien eres|como te llamas|cual es tu nombre|presentate|que eres)")) {
-            return R("Soy YARVIS, su asistente personal, desarrollado por VELKYRA. Estoy a su servicio las veinticuatro horas, $tr.")
+            return R("Soy ODÍN, su asistente personal, desarrollado por VELKYRA. Estoy a su servicio las veinticuatro horas, $tr.")
         }
         if (f.tiene("(quien te (creo|hizo|desarrollo|programo|diseno|invento|fabrico)|quien es tu (creador|dueno|jefe|amo|programador|padre)|quien te dio vida|de quien eres|a quien perteneces|quien te construyo)")) {
             return if (Prefs.soyCreador) {
@@ -306,7 +306,7 @@ class Cerebro(private val ctx: Context) {
             val i = Intent(AlarmClock.ACTION_SET_ALARM)
                 .putExtra(AlarmClock.EXTRA_HOUR, c.get(Calendar.HOUR_OF_DAY))
                 .putExtra(AlarmClock.EXTRA_MINUTES, c.get(Calendar.MINUTE))
-                .putExtra(AlarmClock.EXTRA_MESSAGE, "YARVIS")
+                .putExtra(AlarmClock.EXTRA_MESSAGE, "ODÍN")
                 .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             if (m.conDia && Tiempo.diasEntre(Calendar.getInstance(), c) > 1) {
                 i.putExtra(AlarmClock.EXTRA_DAYS, arrayListOf(c.get(Calendar.DAY_OF_WEEK)))
@@ -321,7 +321,7 @@ class Cerebro(private val ctx: Context) {
             val d = Tiempo.duracion(t) ?: return R("¿De cuánto tiempo, $tr?", seguir = true)
             val i = Intent(AlarmClock.ACTION_SET_TIMER)
                 .putExtra(AlarmClock.EXTRA_LENGTH, d.first)
-                .putExtra(AlarmClock.EXTRA_MESSAGE, "YARVIS")
+                .putExtra(AlarmClock.EXTRA_MESSAGE, "ODÍN")
                 .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
             return if (lanzar(i)) R("Temporizador de ${duracionTexto(d.first)} en marcha, $tr.") else R("No encontré una aplicación de reloj, $tr.")
         }
@@ -697,7 +697,7 @@ class Cerebro(private val ctx: Context) {
         texto = texto.trim().trim('"', '«', '»')
         if (!ServicioNotificaciones.activo) {
             lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            return R("Para responder mensajes necesito acceso a sus notificaciones, $tr. Active YARVIS en la pantalla que le abrí.", cerrar = true)
+            return R("Para responder mensajes necesito acceso a sus notificaciones, $tr. Active ODÍN en la pantalla que le abrí.", cerrar = true)
         }
         val destino = quien ?: ServicioNotificaciones.ultimoRemitente()
             ?: return R("No tengo mensajes recientes para responder, $tr. Puedo enviarle uno nuevo: diga, por ejemplo, manda un WhatsApp a Juan.")
@@ -783,13 +783,13 @@ class Cerebro(private val ctx: Context) {
         }
         if (!abierto) return R("No encontré WhatsApp en este celular, $tr.")
         return if (auto) R("Enviando a $nombre por WhatsApp: «$texto».")
-        else R("Le dejé el mensaje listo para $nombre. Solo toque enviar, $tr. Si activa la accesibilidad de YARVIS, lo enviaré yo mismo.")
+        else R("Le dejé el mensaje listo para $nombre. Solo toque enviar, $tr. Si activa la accesibilidad de ODÍN, lo enviaré yo mismo.")
     }
 
     private fun leerNotificaciones(): Yarvis.Respuesta {
         if (!ServicioNotificaciones.activo) {
             lanzar(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            return R("Necesito acceso a sus notificaciones para leerlas, $tr. Active YARVIS en la pantalla que le abrí.")
+            return R("Necesito acceso a sus notificaciones para leerlas, $tr. Active ODÍN en la pantalla que le abrí.")
         }
         val l = ServicioNotificaciones.recientes()
         if (l.isEmpty()) return R("No tiene mensajes nuevos, $tr.")
@@ -969,7 +969,7 @@ class Cerebro(private val ctx: Context) {
             when {
                 f.tiene("vibra") -> { am.ringerMode = AudioManager.RINGER_MODE_VIBRATE; R("Modo vibración activado, $tr.") }
                 f.tiene("silencio") -> {
-                    if (!nm.isNotificationPolicyAccessGranted) { pedirAccesoNoMolestar(); R("Necesito su permiso para el modo silencio, $tr. Active YARVIS en la pantalla que le abrí.") }
+                    if (!nm.isNotificationPolicyAccessGranted) { pedirAccesoNoMolestar(); R("Necesito su permiso para el modo silencio, $tr. Active ODÍN en la pantalla que le abrí.") }
                     else { am.ringerMode = AudioManager.RINGER_MODE_SILENT; R("Modo silencio activado, $tr.") }
                 }
                 else -> { am.ringerMode = AudioManager.RINGER_MODE_NORMAL; R("Sonido normal activado, $tr.") }
@@ -984,7 +984,7 @@ class Cerebro(private val ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (!nm.isNotificationPolicyAccessGranted) {
             pedirAccesoNoMolestar()
-            return R("Necesito su permiso para controlar el modo no molestar, $tr. Active YARVIS en la pantalla que le abrí.")
+            return R("Necesito su permiso para controlar el modo no molestar, $tr. Active ODÍN en la pantalla que le abrí.")
         }
         nm.setInterruptionFilter(if (activar) NotificationManager.INTERRUPTION_FILTER_PRIORITY else NotificationManager.INTERRUPTION_FILTER_ALL)
         return R(if (activar) "Modo no molestar activado, $tr." else "Modo no molestar desactivado, $tr.")
@@ -1018,7 +1018,7 @@ class Cerebro(private val ctx: Context) {
     private fun global(accion: Int, ok: String): Yarvis.Respuesta {
         if (!ServicioAccesibilidad.activo) {
             lanzar(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            return R("Para eso necesito el permiso de accesibilidad, $tr. Active YARVIS en la pantalla que le abrí.")
+            return R("Para eso necesito el permiso de accesibilidad, $tr. Active ODÍN en la pantalla que le abrí.")
         }
         return R(ok) { principal.postDelayed({ ServicioAccesibilidad.accion(accion) }, 300) }
     }

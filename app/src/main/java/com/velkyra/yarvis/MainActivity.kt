@@ -86,7 +86,7 @@ class MainActivity : Base(), Yarvis.Observador {
         // Barra superior
         val barra = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val marca = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        marca.addView(texto("YARVIS", 24f, Ui.CIAN, Ui.titulo, 0.35f))
+        marca.addView(texto("ODÍN", 24f, Ui.CIAN, Ui.titulo, 0.35f))
         estadoTxt = texto("", 12f, Ui.VERDE, Ui.titulo, 0.12f)
         marca.addView(estadoTxt)
         barra.agregar(marca, ancho = 0, peso = 1f)
@@ -128,7 +128,7 @@ class MainActivity : Base(), Yarvis.Observador {
         nucleo = NucleoView(this).apply {
             setOnClickListener { if (Yarvis.estado == Yarvis.Estado.REPOSO) Yarvis.activar(false) else Yarvis.cancelar() }
             setOnLongClickListener { Yarvis.cancelar(); true }
-            contentDescription = "Toque para hablar con YARVIS"
+            contentDescription = "Toque para hablar con ODÍN"
         }
         col.agregar(nucleo, alto = dp(230), arriba = dp(6))
 
@@ -218,11 +218,11 @@ class MainActivity : Base(), Yarvis.Observador {
             background = if (m.deUsuario) Ui.panel(this@MainActivity, 16f, 0xFF0D2234.toInt(), 0x00000000, 0f)
             else Ui.panel(this@MainActivity, 16f, 0x1A2DE2FF, Ui.BORDE)
         }
-        if (!m.deUsuario) caja.addView(texto("YARVIS", 10f, Ui.CIAN, Ui.titulo, 0.25f))
+        if (!m.deUsuario) caja.addView(texto("ODÍN", 10f, Ui.CIAN, Ui.titulo, 0.25f))
         caja.addView(texto(m.texto, 16f, if (m.deUsuario) Ui.TEXTO else Ui.CIAN_CLARO))
         caja.setOnLongClickListener {
             val cm = getSystemService(android.content.ClipboardManager::class.java)
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("YARVIS", m.texto))
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("ODÍN", m.texto))
             android.widget.Toast.makeText(this, "Texto copiado", android.widget.Toast.LENGTH_SHORT).show()
             true
         }

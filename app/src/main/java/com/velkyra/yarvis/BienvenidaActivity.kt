@@ -117,12 +117,12 @@ class BienvenidaActivity : Base() {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(24), 0, dp(24), dp(22)) }
         col.agregar(View(this), alto = 0, peso = 1f)
         col.agregar(NucleoView(this), ancho = dp(230), alto = dp(230)).also { (it.layoutParams as LinearLayout.LayoutParams).gravity = Gravity.CENTER }
-        col.agregar(texto("Hola. Soy YARVIS.", 28f, Ui.TEXTO, Ui.titulo).apply { gravity = Gravity.CENTER }, arriba = dp(24))
+        col.agregar(texto("Hola. Soy ODÍN.", 28f, Ui.TEXTO, Ui.titulo).apply { gravity = Gravity.CENTER }, arriba = dp(24))
         col.agregar(texto("Su asistente personal con inteligencia artificial. Configuremos todo en menos de un minuto.", 18f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER }, arriba = dp(10))
         col.agregar(View(this), alto = 0, peso = 1f)
         col.agregar(boton("COMENZAR", true) { mostrar(1) })
         col.agregar(texto("Desarrollado por VELKYRA", 12f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER; alpha = 0.6f }, arriba = dp(14))
-        h.postDelayed({ if (paso == 0) Voz.hablar("Hola. Soy YARVIS, su asistente personal. Configuremos todo en menos de un minuto.") }, 600)
+        h.postDelayed({ if (paso == 0) Voz.hablar("Hola. Soy ODÍN, su asistente personal. Configuremos todo en menos de un minuto.") }, 600)
         return col
     }
 
@@ -169,7 +169,7 @@ class BienvenidaActivity : Base() {
             agregar(campoOtro, arriba = dp(10))
             ejemplo = texto("", 16f, Ui.CIAN_CLARO)
             agregar(ejemplo, arriba = dp(18))
-            agregar(interruptor("Yo soy el creador de YARVIS", "Si me pregunta «¿quién te creó?», responderé que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(14))
+            agregar(interruptor("Yo soy el creador de ODÍN", "Si me pregunta «¿quién te creó?», responderé que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(14))
             campoNombre.addTextChangedListener(Cambio { actualizarEjemplo() })
             campoOtro.addTextChangedListener(Cambio { actualizarEjemplo() })
             dibujarChips(); actualizarEjemplo()
@@ -330,7 +330,7 @@ class BienvenidaActivity : Base() {
     private fun pasoPalabra(): View = plantilla("Su palabra de activación", "Enséñeme cómo me llama. Dirá su palabra 5 veces para que aprenda a reconocer SU voz, incluso sin internet.", {
         val t = tarjeta()
         t.addView(texto("Palabra actual: «${Prefs.palabraActivacion}»", 18f, Ui.TEXTO, Ui.fuerte))
-        t.agregar(texto(if (Prefs.muestras().isNotEmpty()) "✓ Ya entrenada" else "Toma menos de un minuto. Puede elegir Yarvis, Jarvis, Velkyra o la que prefiera.", 15f, if (Prefs.muestras().isNotEmpty()) Ui.VERDE else Ui.TEXTO_SUAVE), arriba = dp(6))
+        t.agregar(texto(if (Prefs.muestras().isNotEmpty()) "✓ Ya entrenada" else "Toma menos de un minuto. Puede elegir Odín, Jarvis, Velkyra o la que prefiera.", 15f, if (Prefs.muestras().isNotEmpty()) Ui.VERDE else Ui.TEXTO_SUAVE), arriba = dp(6))
         addView(t)
         agregar(boton("RECONOCER MI VOZ (solo le obedeceré a usted)", false) {
             startActivity(Intent(this@BienvenidaActivity, VozDuenoActivity::class.java))
@@ -355,7 +355,7 @@ class BienvenidaActivity : Base() {
         col.agregar(texto("Diga «${Prefs.palabraActivacion}» en cualquier momento, incluso con el celular bloqueado. También puede tocar el núcleo o escribirme.", 18f, Ui.TEXTO_SUAVE).apply { gravity = Gravity.CENTER }, arriba = dp(10))
         col.agregar(texto("Pruebe: «${Prefs.palabraActivacion}, ¿qué hora es?»  ·  «${Prefs.palabraActivacion}, ¿cómo está el clima?»", 16f, Ui.CIAN_CLARO).apply { gravity = Gravity.CENTER }, arriba = dp(14))
         col.agregar(View(this), alto = 0, peso = 1f)
-        col.agregar(boton("INICIAR YARVIS", true) {
+        col.agregar(boton("INICIAR ODÍN", true) {
             Prefs.configurado = true
             Prefs.escuchaActiva = true
             ServicioEscucha.iniciar(this)

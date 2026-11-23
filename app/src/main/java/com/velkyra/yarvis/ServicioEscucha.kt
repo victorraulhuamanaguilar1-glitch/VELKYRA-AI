@@ -46,12 +46,21 @@ class ServicioEscucha : Service() {
         /** Palabras parecidas o comunes que sirven de «señuelo» para que no se active por error. */
         private val SENUELOS = listOf(
             "javier", "jardines", "jardín", "garbanzo", "travis", "marvin", "darwin", "jarabe", "jarra", "jamás", "harás",
-            "jabón", "harvard", "hola", "gracias", "bueno", "claro", "ahora", "vamos", "mira", "casa", "agua", "mamá", "papá"
+            "jabón", "harvard", "hola", "gracias", "bueno", "claro", "ahora", "vamos", "mira", "casa", "agua", "mamá", "papá",
+            "oído", "odio", "olvidé", "dime", "dinero", "orden", "oriente"
         )
 
         private fun usaPalabraPorDefecto(): Boolean {
             val p = Frase.normalizar(Prefs.palabraActivacion)
             return p.contains("yarvis") || p.contains("jarvis")
+        }
+
+        /** ¿El texto contiene la palabra de activación tal cual (sin entrenamiento)? */
+        fun esPalabraBase(texto: String): Boolean {
+            if (usaPalabraPorDefecto()) return esJarvis(texto)
+            val p = Frase.normalizar(Prefs.palabraActivacion).removePrefix("oye ").trim()
+            if (p.isBlank()) return false
+            return Regex("(^|\\s)" + Regex.escape(p) + "($|\\s)").containsMatchIn(Frase.normalizar(texto))
         }
 
         /**
@@ -66,8 +75,9 @@ class ServicioEscucha : Service() {
         private fun gramatica(muestras: List<String>, forzarJarvis: Boolean = false): String {
             val frases = LinkedHashSet<String>()
             frases.addAll(muestras.map { it.lowercase() })
-            if (forzarJarvis) frases.add("jarvis")
-            if (usaPalabraPorDefecto() || frases.isEmpty()) frases.add("jarvis")
+            // La palabra base: «jarvis» (así entiende «Yarvis») o la palabra elegida tal cual (ej. «odín»)
+            val base = if (usaPalabraPorDefecto()) "jarvis" else Prefs.palabraActivacion.lowercase().removePrefix("oye ").trim()
+            frases.add(base)
             val usadas = frases.flatMap { it.split(" ") }.toSet()
             frases.addAll(SENUELOS.filter { it !in usadas && Frase.normalizar(it) !in usadas })
             frases.add("[unk]")
@@ -94,7 +104,8 @@ class ServicioEscucha : Service() {
             for (m in Prefs.muestras().map { Frase.normalizar(it) }.filter { it.isNotBlank() }) {
                 if (Regex("^(oye |hey |ey )?" + Regex.escape(m) + "($|\\s)").containsMatchIn(n)) return true
             }
-            if (!usaPalabraPorDefecto() && Prefs.muestras().isNotEmpty()) return false
+            if (esPalabraBase(texto)) return true
+            if (!usaPalabraPorDefecto()) return false
             if (n.split(" ").any { it in palabrasSueltas }) return true
             val extras = try { Prefs.palabrasExtra } catch (_: Exception) { "" }
             for (e in extras.split(",").map { Frase.normalizar(it) }.filter { it.length >= 3 }) {
@@ -312,7 +323,7 @@ class ServicioEscucha : Service() {
         }
         return Notification.Builder(this, Avisos.CANAL_ESCUCHA)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("YARVIS en línea")
+            .setContentTitle("ODÍN en línea")
             .setContentText(texto)
             .setContentIntent(abrir)
             .setOngoing(true)

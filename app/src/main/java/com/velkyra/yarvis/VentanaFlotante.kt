@@ -33,7 +33,7 @@ object VentanaFlotante : Yarvis.Observador {
         val n = NucleoView(c).apply { compacto = true; estado = Yarvis.estado }
         panel.addView(n, LinearLayout.LayoutParams(c.dp(64), c.dp(64)))
         val columna = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; setPadding(c.dp(12), 0, 0, 0) }
-        columna.addView(c.texto("YARVIS", 11f, Ui.CIAN, Ui.titulo, 0.3f))
+        columna.addView(c.texto("ODÍN", 11f, Ui.CIAN, Ui.titulo, 0.3f))
         val tv = c.texto("Escuchando…", 16f, Ui.TEXTO, Ui.normal).apply {
             maxLines = 4
             ellipsize = TextUtils.TruncateAt.END

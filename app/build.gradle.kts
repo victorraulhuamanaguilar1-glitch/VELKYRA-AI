@@ -12,7 +12,7 @@ android {
         minSdk = 31
         targetSdk = 34
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 100
-        versionName = "2.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        versionName = "3.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
         // La clave de IA llega desde el secreto GEMINI_API_KEY de GitHub (nunca se guarda en el código)
         ndk {
             // Solo procesadores de celulares reales (más liviano y compatible)

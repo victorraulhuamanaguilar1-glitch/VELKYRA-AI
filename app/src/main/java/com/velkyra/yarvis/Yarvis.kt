@@ -117,7 +117,7 @@ object Yarvis {
     /** Cómo dirigirse a quien habla ahora. */
     val tratoActual: String get() = hablanteActual ?: Prefs.trato
 
-    /** Despierta a YARVIS (por la palabra "Yarvis", al tocar el núcleo o desde la notificación). */
+    /** Despierta a YARVIS (por la palabra "Odín", al tocar el núcleo o desde la notificación). */
     fun activar(porPalabra: Boolean, invitado: String? = null) = principal.post {
         hablanteActual = if (porPalabra) invitado else null
         val miSesion = ++sesion

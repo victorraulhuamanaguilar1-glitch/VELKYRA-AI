@@ -13,6 +13,13 @@ class App : Application() {
         if (!sp.getBoolean("migr_voz_google", false)) {
             sp.edit().putBoolean("usar_voz_neural", false).putBoolean("migr_voz_google", true).apply()
         }
+        // Una sola vez: el asistente pasa a llamarse ODÍN (la palabra «Yarvis» entrenada se reemplaza)
+        if (!sp.getBoolean("migr_odin", false)) {
+            val pal = Frase.normalizar(sp.getString("palabra_activacion", "") ?: "")
+            val e = sp.edit().putBoolean("migr_odin", true)
+            if (pal.isBlank() || pal.contains("yarvis") || pal.contains("jarvis")) e.putString("palabra_activacion", "Odín").putString("muestras_palabra", "[]")
+            e.apply()
+        }
         Ui.init(this)
         Avisos.crearCanales(this)
         Yarvis.init(this)

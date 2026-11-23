@@ -8,7 +8,7 @@ import java.net.URLEncoder
 /** Respaldo de conocimiento gratuito y sin límite diario: Wikipedia en español. */
 object Wikipedia {
 
-    private const val AGENTE = "YARVIS-Android/2.0 (VELKYRA; velkyra3@gmail.com)"
+    private const val AGENTE = "ODÍN-Android/2.0 (VELKYRA; velkyra3@gmail.com)"
 
     private fun leer(url: String): JSONObject {
         val c = URL(url).openConnection() as HttpURLConnection

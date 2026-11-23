@@ -16,7 +16,7 @@ class ComandosActivity : Base() {
         "Música y videos" to listOf("Reproduce música andina en YouTube", "Pon Daddy Yankee", "Busca recetas de trucha en TikTok", "Pausa la música", "Siguiente canción", "Pon Shakira en Spotify"),
         "Celular" to listOf("Abre WhatsApp", "Enciende la linterna", "Sube el volumen", "Volumen al 50 por ciento", "¿Cuánta batería tengo?", "Modo vibración", "Activa no molestar", "Sube el brillo", "Abre el wifi", "Toma una selfie", "Abre la página velkyra.com"),
         "Manos libres (accesibilidad)" to listOf("Bloquea el celular", "Toma una captura de pantalla", "Ve al inicio", "Atrás", "Apps recientes"),
-        "Control de YARVIS" to listOf("Deja de escuchar", "Activa la escucha", "Cancela", "Adiós")
+        "Control de ODÍN" to listOf("Deja de escuchar", "Activa la escucha", "Cancela", "Adiós")
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {

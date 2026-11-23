@@ -76,18 +76,18 @@ jobs:
           set -o pipefail
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --console=plain 2>&1 | tee build.log
-          cp app/build/outputs/apk/release/app-release.apk YARVIS.apk
+          cp app/build/outputs/apk/release/app-release.apk ODIN.apk
 
       - name: Publicar en Releases
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.${{ github.run_number }}
-          name: YARVIS v2.0.${{ github.run_number }}
+          tag_name: v3.0.${{ github.run_number }}
+          name: ODÍN v3.0.${{ github.run_number }}
           body: |
-            Descarga **YARVIS.apk** e instálalo en tu celular (Android 12 o superior).
+            Descarga **ODIN.apk** e instálalo en tu celular (Android 12 o superior).
             Desarrollado por VELKYRA · Soporte: velkyra3@gmail.com
-          files: YARVIS.apk
+          files: ODIN.apk
           make_latest: true
 
       - name: Guardar registro de compilación

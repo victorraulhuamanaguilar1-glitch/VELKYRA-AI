@@ -108,7 +108,7 @@ object Noticias {
         val url = if (tema.isNullOrBlank()) "https://news.google.com/rss?hl=es-419&gl=PE&ceid=PE:es-419"
         else "https://news.google.com/rss/search?hl=es-419&gl=PE&ceid=PE:es-419&q=" + URLEncoder.encode("$tema when:2d", "UTF-8")
         val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) YARVIS")
+        c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) ODÍN")
         c.connectTimeout = 12000
         c.readTimeout = 15000
         try {

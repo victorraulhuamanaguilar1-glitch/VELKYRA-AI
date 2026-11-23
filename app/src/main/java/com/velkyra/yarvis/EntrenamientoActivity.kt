@@ -57,11 +57,11 @@ class EntrenamientoActivity : Base(), RecognitionListener {
 
         c.addView(texto("Enséñeme a reconocer su voz. Elija la palabra con la que me llamará y dígala $MUESTRAS veces, como lo haría normalmente.", 16f, Ui.TEXTO_SUAVE))
         c.agregar(etiqueta("Su palabra de activación"), arriba = dp(18))
-        campoPalabra = campo("Yarvis", Prefs.palabraActivacion)
+        campoPalabra = campo("Odín", Prefs.palabraActivacion)
         c.agregar(campoPalabra, arriba = dp(8))
         val sc = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         val chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (s in listOf("Yarvis", "Jarvis", "Oye Yarvis", "Velkyra", "Asistente", "Computadora")) {
+        for (s in listOf("Odín", "Oye Odín", "Orión", "Fénix", "Merlín", "Jarvis")) {
             chips.addView(chip(s) { campoPalabra.setText(s) }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
         }
         sc.addView(chips)
@@ -99,7 +99,7 @@ class EntrenamientoActivity : Base(), RecognitionListener {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 31)
             return
         }
-        if (campoPalabra.text.isBlank()) campoPalabra.setText("Yarvis")
+        if (campoPalabra.text.isBlank()) campoPalabra.setText("Odín")
         muestras.clear()
         lista.removeAllViews()
         botonPrincipal.visibility = View.GONE
@@ -113,17 +113,13 @@ class EntrenamientoActivity : Base(), RecognitionListener {
                 return@obtener
             }
             modelo = m
-            val p = Frase.normalizar(palabra())
-            if (p.contains("yarvis") || p.contains("jarvis")) {
-                // Primero se prueba el método que casi no tiene falsas activaciones
-                fase = Fase.PRUEBA
-                intentosPrueba = 0
-                aciertosPrueba = 0
-                siguientePrueba()
-            } else {
-                fase = Fase.GRABANDO
-                siguienteMuestra()
-            }
+            Prefs.palabraActivacion = palabra()
+            // Primero se prueba la palabra tal cual (el método con menos falsas activaciones);
+            // si no le reconoce bien, se aprende cómo la pronuncia el usuario.
+            fase = Fase.PRUEBA
+            intentosPrueba = 0
+            aciertosPrueba = 0
+            siguientePrueba()
         }
     }
 
@@ -133,7 +129,7 @@ class EntrenamientoActivity : Base(), RecognitionListener {
         else instruccion.text = "Necesito permiso para usar el micrófono."
     }
 
-    private fun palabra() = campoPalabra.text.toString().trim().ifBlank { "Yarvis" }
+    private fun palabra() = campoPalabra.text.toString().trim().ifBlank { "Odín" }
 
     private fun siguientePrueba() {
         intentosPrueba++
@@ -238,7 +234,7 @@ class EntrenamientoActivity : Base(), RecognitionListener {
             Fase.PRUEBA -> {
                 if (t.isBlank()) return
                 detener()
-                resultadoPrueba(ServicioEscucha.esJarvis(t), t)
+                resultadoPrueba(ServicioEscucha.esPalabraBase(t), t)
             }
             Fase.GRABANDO -> {
                 if (t.isBlank()) return
@@ -330,7 +326,7 @@ class EntrenamientoActivity : Base(), RecognitionListener {
         if (!aceptando) return
         val t = textoDe(hypothesis).replace("[unk]", "…")
         if (t.isNotBlank() && fase != Fase.LISTO) oido.text = "«$t»"
-        if (fase == Fase.PRUEBA && ServicioEscucha.esJarvis(t)) {
+        if (fase == Fase.PRUEBA && ServicioEscucha.esPalabraBase(t)) {
             detener()
             resultadoPrueba(true, t)
             return

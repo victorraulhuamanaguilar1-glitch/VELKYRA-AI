@@ -217,15 +217,15 @@ object Avisos {
 
     fun crearCanales(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CANAL_ESCUCHA, "Escucha «Yarvis»", NotificationManager.IMPORTANCE_LOW).apply {
-            description = "Aviso fijo mientras YARVIS espera su palabra de activación"
+        nm.createNotificationChannel(NotificationChannel(CANAL_ESCUCHA, "Escucha «Odín»", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Aviso fijo mientras ODÍN espera su palabra de activación"
             setShowBadge(false)
         })
         nm.createNotificationChannel(NotificationChannel(CANAL_RECORDATORIOS, "Recordatorios", NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Recordatorios que le pidió a YARVIS"
+            description = "Recordatorios que le pidió a ODÍN"
             enableVibration(true)
         })
-        nm.createNotificationChannel(NotificationChannel(CANAL_SISTEMA, "Avisos de YARVIS", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CANAL_SISTEMA, "Avisos de ODÍN", NotificationManager.IMPORTANCE_DEFAULT))
     }
 
     private fun abrirApp(ctx: Context, req: Int, escuchar: Boolean = false): PendingIntent = PendingIntent.getActivity(
@@ -252,7 +252,7 @@ object Avisos {
         if (!ctx.tiene(Manifest.permission.POST_NOTIFICATIONS)) return
         val n = Notification.Builder(ctx, CANAL_SISTEMA)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("YARVIS está listo")
+            .setContentTitle("ODÍN está listo")
             .setContentText("Toque aquí para activar la escucha de «${Prefs.palabraActivacion}».")
             .setContentIntent(abrirApp(ctx, 51))
             .setAutoCancel(true)

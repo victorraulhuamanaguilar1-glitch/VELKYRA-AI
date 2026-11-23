@@ -22,7 +22,7 @@ object VozPremium {
     data class VozG(val id: String, val nombre: String, val hombre: Boolean, val estilo: String)
 
     val VOCES = listOf(
-        VozG("Charon", "Carlos", true, "Grave e informativo · ideal para YARVIS"),
+        VozG("Charon", "Carlos", true, "Grave e informativo · ideal para ODÍN"),
         VozG("Orus", "Óscar", true, "Firme y seguro"),
         VozG("Algenib", "Gabriel", true, "Voz grave y rasposa"),
         VozG("Iapetus", "Iván", true, "Claro y sereno"),

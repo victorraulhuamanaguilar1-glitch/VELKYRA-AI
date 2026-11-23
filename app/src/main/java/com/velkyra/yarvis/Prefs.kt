@@ -182,7 +182,7 @@ object Prefs {
 
     /** La palabra con la que el usuario llama a YARVIS. */
     var palabraActivacion: String
-        get() = s("palabra_activacion", "Yarvis").ifBlank { "Yarvis" }
+        get() = s("palabra_activacion", "Odín").ifBlank { "Odín" }
         set(v) = ps("palabra_activacion", v.trim())
 
     /** Cómo escucha el reconocedor sin internet la palabra del usuario (aprendido en el entrenamiento). JSON. */

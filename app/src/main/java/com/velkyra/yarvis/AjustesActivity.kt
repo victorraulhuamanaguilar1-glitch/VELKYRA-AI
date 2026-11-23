@@ -53,7 +53,7 @@ class AjustesActivity : Base() {
         val cCiudad = campo("Ejemplo: Juliaca", Prefs.ciudad)
         perfil.agregar(cCiudad, arriba = dp(4))
         perfil.agregar(interruptor("Modo confianza", "Le hablo de tú, relajado y directo, como un amigo.", Prefs.modoConfianza) { Prefs.modoConfianza = it }, arriba = dp(8))
-        perfil.agregar(interruptor("Yo soy el creador de YARVIS", "Si le pregunta «¿quién te creó?», responderá que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(8))
+        perfil.agregar(interruptor("Yo soy el creador de ODÍN", "Si le pregunta «¿quién te creó?», responderá que fue usted.", Prefs.soyCreador) { Prefs.soyCreador = it }, arriba = dp(8))
         perfil.agregar(boton("GUARDAR PERFIL", false) {
             Prefs.nombre = cNombre.text.toString()
             Prefs.tratoGuardado = cTrato.text.toString()
@@ -89,7 +89,7 @@ class AjustesActivity : Base() {
         act.agregar(estadoPermiso(Settings.canDrawOverlays(this), "Puede aparecer sobre otras apps", "Permitir aparecer sobre otras apps") {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
-        act.agregar(texto("En Xiaomi, Huawei, Oppo, Vivo o Samsung, active también «Inicio automático» y quite las restricciones de batería de YARVIS en los ajustes del celular para que nunca se detenga.", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        act.agregar(texto("En Xiaomi, Huawei, Oppo, Vivo o Samsung, active también «Inicio automático» y quite las restricciones de batería de ODÍN en los ajustes del celular para que nunca se detenga.", 13f, Ui.TEXTO_SUAVE), arriba = dp(4))
 
         // SEGURIDAD POR VOZ
         val seg = seccion("Seguridad por voz")
@@ -185,14 +185,14 @@ class AjustesActivity : Base() {
         msj.addView(estadoPermiso(ServicioNotificaciones.permisoConcedido(this), "Acceso a notificaciones concedido", "Conceder acceso a notificaciones") {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         })
-        msj.addView(interruptor("Enviar WhatsApp automáticamente", "YARVIS toca «Enviar» por usted.", Prefs.whatsappAutomatico) { Prefs.whatsappAutomatico = it })
-        msj.addView(estadoPermiso(ServicioAccesibilidad.permisoConcedido(this), "Accesibilidad activada", "Activar accesibilidad de YARVIS") {
+        msj.addView(interruptor("Enviar WhatsApp automáticamente", "ODÍN toca «Enviar» por usted.", Prefs.whatsappAutomatico) { Prefs.whatsappAutomatico = it })
+        msj.addView(estadoPermiso(ServicioAccesibilidad.permisoConcedido(this), "Accesibilidad activada", "Activar accesibilidad de ODÍN") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
 
         // PERMISOS
         val per = seccion("Permisos")
-        per.addView(texto("Revise y conceda todos los permisos que YARVIS necesita.", 15f, Ui.TEXTO))
+        per.addView(texto("Revise y conceda todos los permisos que ODÍN necesita.", 15f, Ui.TEXTO))
         per.agregar(boton("REVISAR PERMISOS", false) {
             startActivity(Intent(this, BienvenidaActivity::class.java).putExtra(BienvenidaActivity.EXTRA_SOLO_PERMISOS, true))
         }, arriba = dp(10))
@@ -213,7 +213,7 @@ class AjustesActivity : Base() {
         val logo = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         logo.addView(NucleoView(this).apply { compacto = true }, LinearLayout.LayoutParams(dp(72), dp(72)))
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
-        info.addView(texto("YARVIS", 22f, Ui.CIAN, Ui.titulo, 0.3f))
+        info.addView(texto("ODÍN", 22f, Ui.CIAN, Ui.titulo, 0.3f))
         info.addView(texto("Versión ${BuildConfig.VERSION_NAME}", 14f, Ui.TEXTO_SUAVE))
         logo.addView(info)
         acerca.addView(logo)
@@ -222,7 +222,7 @@ class AjustesActivity : Base() {
             setOnClickListener {
                 try {
                     startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${Prefs.CORREO_SOPORTE}"))
-                        .putExtra(Intent.EXTRA_SUBJECT, "Soporte YARVIS ${BuildConfig.VERSION_NAME}"))
+                        .putExtra(Intent.EXTRA_SUBJECT, "Soporte ODÍN ${BuildConfig.VERSION_NAME}"))
                 } catch (_: Exception) {}
             }
         }, arriba = dp(6))
