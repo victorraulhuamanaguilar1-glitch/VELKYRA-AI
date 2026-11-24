@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">ODÍN</string>
     <string name="desc_accesibilidad">Permite a ODÍN enviar tus mensajes de WhatsApp sin que toques la pantalla, bloquear el celular, tomar capturas y volver al inicio con tu voz. ODÍN no guarda ni comparte lo que hay en tu pantalla.</string>
+    <string name="widget_desc">Toque para hablar con ODÍN</string>
 </resources>

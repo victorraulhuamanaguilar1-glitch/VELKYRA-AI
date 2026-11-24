@@ -99,7 +99,7 @@ class Cerebro(private val ctx: Context) {
         return t.ifBlank { texto }
     }
 
-    private val rAccion = Regex("(public|postea|chatea|estado|llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa|gast|pague|compre|correo|email|mail|modo|traduc|pantalla|camara|ves\\b|donde estas|copia|respald|resum|aplau)")
+    private val rAccion = Regex("(public|postea|chatea|estado|llam|marc|telefon|mensaje|whatsapp|wasap|wsp|sms|escrib|envi|mand|respond|contest|reproduc|\\bpon\\b|ponme|video|cancion|musica|abre|abrir|abri|busca|alarma|recuerd|lleva|naveg|linterna|volumen|foto|camara|selfie|despierta|temporizador|avisa|grab|acta|recuerda|cumple|laptop|computadora|cambio|dolar|antirrobo|gast|pague|compre|correo|email|mail|modo|traduc|pantalla|camara|ves\\b|donde estas|copia|respald|resum|aplau)")
 
     fun procesar(texto: String, cb: (Yarvis.Respuesta) -> Unit) {
         val limpio = limpiarOrden(texto)
@@ -215,6 +215,7 @@ class Cerebro(private val ctx: Context) {
         }
 
         // --- Funciones nuevas: encontrar el celular, rutina, modos, traductor, cámara, pantalla, mensajes, gastos, correo, respaldo
+        nuevas2(f, cb)?.let { return it }
         nuevas(f, cb)?.let { return it }
 
         // --- Seguridad por voz: quién puede darle órdenes ---------------------
@@ -703,6 +704,290 @@ class Cerebro(private val ctx: Context) {
     }
 
     // =====================================================================
+    //  Funciones nuevas (v3.2): programados, grabadora, memoria, cumpleaños, laptop, lugares, antirrobo, cambio
+    // =====================================================================
+
+    private val rLaptop = "(laptop|lap top|la pc|mi pc|computadora|compu|portatil|ordenador)"
+
+    private fun nuevas2(f: Frase, cb: (Yarvis.Respuesta) -> Unit): Yarvis.Respuesta? {
+        val t = f.t
+
+        // --- Grabar reuniones ----------------------------------------------------------
+        if (Grabadora.activa && f.tiene("((termina|terminar|deten|detener|para|parar|finaliza|corta|acaba)( la)? (grabacion|reunion|clase)|deja de grabar|ya (termino|acabo) la (reunion|clase)|fin de la (reunion|grabacion)|haz el acta)")) {
+            return fondo(cb) { R(Grabadora.procesar(ctx), cerrar = true) }
+        }
+        if (Grabadora.activa && f.tiene("(cuanto (llevo|lleva|va) grabando|cuanto tiempo de grabacion|sigues grabando)")) {
+            return R("Llevo ${Grabadora.duracionTexto()} grabando, $tr.", cerrar = true)
+        }
+        Regex("^(?:graba|grabar|empieza a grabar|inicia(?:r)? (?:la )?grabacion(?: de)?|comienza a grabar)\\s*(?:la |esta |el |una )?(reunion|clase|conferencia|charla|sesion|asamblea|entrevista|capacitacion|esto|audio)?(?: de (.+))?$").find(t)?.let { m ->
+            if (Grabadora.activa) return R("Ya estoy grabando, $tr. Llevo ${Grabadora.duracionTexto()}.")
+            val tipo = m.groupValues[1].ifBlank { "reunión" }.replace("reunion", "reunión").replace("sesion", "sesión").replace("capacitacion", "capacitación").replace("esto", "reunión").replace("audio", "reunión")
+            val titulo = (tipo.replaceFirstChar { it.uppercase() } + (m.groups[2]?.let { " de " + f.originalDeGrupo(m, 2) } ?: ""))
+            if (!Grabadora.iniciar(ctx, titulo)) return R("No pude empezar a grabar, $tr.")
+            ServicioEscucha.reiniciar()
+            return R("Grabando, $tr. Deje el celular cerca de quienes hablan. Cuando terminen, diga «${Prefs.palabraActivacion}, termina la grabación» y le preparo el acta.", cerrar = true)
+        }
+        if (f.tiene("(comparte|compartir|envia|manda)(me)? el acta") ) {
+            return if (Grabadora.compartirActa(ctx)) R("Elija dónde compartir el acta, $tr.", cerrar = true) else R("Aún no tengo un acta, $tr. Diga: graba la reunión.")
+        }
+        if (f.tiene("(leeme|lee|resume) (el|la ultima) acta")) {
+            val a = Grabadora.ultimaActa ?: return R("Aún no tengo un acta, $tr.")
+            return R(a.substringBefore("────").take(1500), seguir = true)
+        }
+
+        // --- Mensajes programados ---------------------------------------------------------
+        if (f.tiene("(mis mensajes programados|que mensajes (tengo )?programados|mensajes pendientes por enviar)")) {
+            val l = Programados.lista(ctx)
+            if (l.isEmpty()) return R("No tiene mensajes programados, $tr.")
+            return R("Tiene ${l.size} mensaje${if (l.size > 1) "s" else ""} programado${if (l.size > 1) "s" else ""}: " +
+                l.joinToString(". ") { "a ${it.quien}, ${Tiempo.describir(Calendar.getInstance().apply { timeInMillis = it.cuando })}: «${it.texto}»" } + ".")
+        }
+        Regex("(?:cancela|borra|elimina|anula)(?:r)? (?:el |los |todos los )?mensajes? programados?(?: (?:para|a) (.+))?$").find(t)?.let { m ->
+            val q = m.groups[1]?.let { f.originalDeGrupo(m, 1) }
+            val l = Programados.cancelar(ctx, q)
+            return R(if (l.isEmpty()) "No encontré mensajes programados${q?.let { " para $it" } ?: ""}, $tr." else "Cancelé ${l.size} mensaje${if (l.size > 1) "s" else ""} programado${if (l.size > 1) "s" else ""}, $tr.")
+        }
+        programado(f)?.let { return it }
+
+        // --- Memoria personal --------------------------------------------------------------
+        Regex("^(?:recuerda|acuerdate de|guarda|anota en tu memoria|memoriza)(?: que)? (.+)$").find(t)?.let { m ->
+            if (!t.startsWith("recuerdame") && Tiempo.analizar(t)?.let { it.conHora } != true) {
+                val dato = f.originalDeGrupo(m, 1).trim().trimEnd('.')
+                if (dato.split(" ").size >= 2 && !Regex("^(este lugar|esta ubicacion|aqui)").containsMatchIn(m.groupValues[1])) {
+                    Memoria.recordar(dato.replaceFirstChar { it.uppercase() })
+                    return R("Lo recordaré, $tr: ${Memoria.enSegunda(dato)}.")
+                }
+            }
+        }
+        if (f.tiene("^(donde (deje|puse|guarde|esta|estan|quedo|quedaron|estacione)|cual es (mi|la|el)|cuales son (mis|las)|que te dije (de|sobre)|te acuerdas (de|que|donde)|recuerdas (donde|que|cual)|cual era (mi|la|el)|como se llama (mi|el|la))")) {
+            val datos = Memoria.buscar(t)
+            if (datos.isNotEmpty()) {
+                val d = datos.first()
+                return R("${Memoria.enSegunda(d.texto).replaceFirstChar { it.uppercase() }}. Me lo dijo ${Tiempo.describir(Calendar.getInstance().apply { timeInMillis = d.hora }).replace(Regex("^(el|a las) "), "el ")}.".replace(" el hoy", " hoy"), cerrar = false)
+            }
+            if (f.tiene("^donde (deje|puse|guarde|estacione)")) return R("No me dijo dónde lo dejó, $tr. La próxima vez dígame, por ejemplo: recuerda que dejé las llaves en el cajón.")
+        }
+        if (f.tiene("(que (cosas )?te (pedi|dije) (que )?(recordar|recuerdes)|que recuerdas de mi|tu memoria|que tienes guardado)")) {
+            val l = Memoria.lista()
+            if (l.isEmpty()) return R("No me ha pedido recordar nada todavía, $tr.")
+            return R("Me pidió recordar: " + l.takeLast(8).joinToString(". ") { Memoria.enSegunda(it.texto) } + ".")
+        }
+        Regex("^(?:olvida|olvidate de|borra de tu memoria)(?: lo de| que| de)? (.+)$").find(t)?.let { m ->
+            if (f.tiene("(mi voz|la voz)")) return@let
+            if (f.tiene("^(olvida|olvidate de) (todo|todo lo que te dije)$")) { Memoria.borrarTodo(); return R("Borré todo lo que me pidió recordar, $tr.") }
+            val n = Memoria.olvidar(m.groupValues[1])
+            if (n > 0) return R("Listo, $tr. Lo olvidé.")
+        }
+
+        // --- Cumpleaños ---------------------------------------------------------------------
+        Regex("^(?:el )?cumpleanos de (.+?) es (?:el )?(\\d{1,2}) de (enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)$").find(t)?.let { m ->
+            val mes = Cumpleanos.MESES.indexOf(m.groupValues[3].replace("setiembre", "septiembre")) + 1
+            val nombre = f.originalDeGrupo(m, 1).replaceFirstChar { it.uppercase() }
+            Cumpleanos.agregar(ctx, Cumpleanos.Cumple(nombre, m.groupValues[2].toInt(), mes))
+            return R("Anotado, $tr: $nombre cumple el ${m.groupValues[2]} de ${Cumpleanos.MESES[mes - 1]}. Ese día le aviso.")
+        }
+        if (f.tiene("(quien(es)? cumple(n)? (anos )?(hoy|esta semana|este mes|pronto|manana)|cumpleanos (de hoy|de esta semana|de este mes|proximos)|hay cumpleanos)")) {
+            val hoy = Cumpleanos.deHoy(ctx)
+            val dias = when { f.tiene("mes") -> 31; f.tiene("manana") -> 1; else -> 7 }
+            val prox = if (f.tiene("hoy")) emptyList() else Cumpleanos.proximos(ctx, dias)
+            if (hoy.isEmpty() && prox.isEmpty()) return R("No hay cumpleaños ${if (f.tiene("hoy")) "hoy" else "próximos"} en sus contactos, $tr.")
+            val partes = mutableListOf<String>()
+            if (hoy.isNotEmpty()) partes.add("Hoy cumple años ${hoy.joinToString(" y ") { it.nombre }}")
+            if (prox.isNotEmpty()) partes.add(prox.take(6).joinToString(", ") { (c, d) -> "${c.nombre} ${if (d == 1) "mañana" else "en $d días, el ${Cumpleanos.fecha(c)}"}" })
+            if (hoy.isNotEmpty()) {
+                pendiente = { f2 -> decidirSaludo(hoy.first().nombre, f2) }
+                pendienteHasta = System.currentTimeMillis() + 60_000
+            }
+            return R(partes.joinToString(". ") + "." + if (hoy.isNotEmpty()) " ¿Le mando un saludo a ${hoy.first().nombre}?" else "", seguir = hoy.isNotEmpty())
+        }
+        Regex("^(?:cuando (?:es|cumple) (?:el cumpleanos de |anos )?|cuando cumple )(.+?)(?: anos)?$").find(t)?.let { m ->
+            val c = Cumpleanos.de(ctx, m.groupValues[1]) ?: return@let
+            return R("${c.nombre} cumple años el ${Cumpleanos.fecha(c)}, $tr.")
+        }
+        Regex("^(?:saluda(?:lo|la)?|felicita(?:lo|la)?|manda(?:le)? (?:un )?saludo(?: de cumpleanos)?)(?: a (.+?))?(?: por su cumpleanos)?$").find(t)?.let { m ->
+            val nombre = m.groups[1]?.let { f.originalDeGrupo(m, 1) } ?: Cumpleanos.deHoy(ctx).firstOrNull()?.nombre ?: return@let
+            if (!f.tiene("cumple") && m.groups[1] == null) return@let
+            return decidirSaludo(nombre, Frase("si"))
+        }
+
+        // --- Laptop (VELKYRA PC Link) ----------------------------------------------------------
+        if (f.tiene("(conecta|vincula|enlaza|empareja)(te)? (con )?(mi |la )?$rLaptop")) {
+            return fondo(cb) {
+                val pc = PcLink.buscar() ?: return@fondo R("No encontré su laptop en el wifi, $tr. En la laptop descargue y abra «VELKYRA PC Link»; el enlace está en Ajustes, sección Mi laptop. Deben estar en el mismo wifi.")
+                esperar("Encontré ${pc.second}. Dígame el código de 6 números que aparece en la laptop.") { f2 ->
+                    val pin = f2.t.filter { it.isDigit() }.ifBlank { Tiempo.numero(f2.t).toInt().toString() }
+                    if (pin.length != 6) return@esperar R("El código debe tener 6 números, $tr. Diga «conecta con mi laptop» para intentar de nuevo.")
+                    fondo(cb) {
+                        val err = PcLink.emparejar(pc.first, pc.second, pin)
+                        R(err?.let { "$it, $tr." } ?: "¡Listo! Ya controlo ${PcLink.nombre}. Pruebe: «pon música en la laptop» o «apaga la laptop».")
+                    }
+                }
+            }
+        }
+        if (f.tiene("\\b(la|mi|tu) (laptop|lap top|pc|computadora|compu|portatil)\\b") && !f.tiene("^(que es|como|cuanto cuesta|cual es la mejor|recomiendame)")) {
+            pcOrden(f)?.let { (accion, valor) -> return fondo(cb) { R(PcLink.orden(accion, valor), cerrar = true) } }
+        }
+
+        // --- Recordatorios por lugar ---------------------------------------------------------
+        Regex("^(?:guarda|anota|recuerda|marca)(?: este lugar| esta ubicacion| donde estoy| aqui)? como (.+)$|^(?:aqui|este lugar) es (.+)$").find(t)?.let { m ->
+            val nombre = (m.groups[1] ?: m.groups[2])?.let { f.originalDeGrupo(m, if (m.groups[1] != null) 1 else 2) } ?: return@let
+            return fondo(cb) {
+                val l = Lugares.aqui(ctx) ?: return@fondo R("No pude saber dónde está, $tr. Active la ubicación.")
+                Lugares.guardarLugar(ctx, nombre, l.latitude, l.longitude)
+                R("Guardé este lugar como «${nombre.replace(Regex("(?i)^(mi|la|el) "), "")}», $tr. Ya puede decirme: cuando llegue a ${nombre.lowercase()}, recuérdame…")
+            }
+        }
+        val rLugar1 = Regex("^(?:cuando|apenas|en cuanto) (llegue|este|entre|salga|me vaya) (?:a|al|en|de|del) (.+?),? (?:recuerdame|avisame|dime|recordarme)(?: que| de)? (.+)$")
+        val rLugar2 = Regex("^(?:recuerdame|avisame|recordarme)(?: que| de)? (.+?) (?:cuando|apenas|en cuanto) (llegue|este|entre|salga|me vaya) (?:a|al|en|de|del) (.+)$")
+        val ml1 = rLugar1.find(t)
+        val ml2 = if (ml1 == null) rLugar2.find(t) else null
+        if (ml1 != null || ml2 != null) {
+            val verbo = ml1?.groupValues?.get(1) ?: ml2!!.groupValues[2]
+            val lugar = ml1?.let { f.originalDeGrupo(it, 2) } ?: f.originalDeGrupo(ml2!!, 3)
+            val tarea = ml1?.let { f.originalDeGrupo(it, 3) } ?: f.originalDeGrupo(ml2!!, 1)
+            val entrar = verbo !in setOf("salga", "me vaya")
+            if (!Lugares.permisoListo(ctx)) {
+                Lugares.pedirPermiso(ctx)
+                return R("Para avisarle al llegar necesito su ubicación «todo el tiempo», $tr. En la pantalla que le abrí entre a Permisos, Ubicación, y elija «Permitir todo el tiempo». Luego repítame el recordatorio.", cerrar = true)
+            }
+            return fondo(cb) {
+                val (sitio, radio) = Lugares.ubicar(ctx, lugar) ?: return@fondo R("No encontré «$lugar» en el mapa, $tr. Si es un lugar suyo, vaya allí y dígame: guarda este lugar como $lugar.")
+                Lugares.crear(ctx, tarea.replaceFirstChar { it.uppercase() }, sitio, radio, entrar)
+                R("Hecho, $tr. Cuando ${if (entrar) "llegue a" else "salga de"} ${sitio.nombre} le recordaré: $tarea.")
+            }
+        }
+        if (f.tiene("(mis recordatorios (por|de) lugar|recordatorios de ubicacion)")) {
+            val l = Lugares.lista(ctx)
+            return R(if (l.isEmpty()) "No tiene recordatorios por lugar, $tr." else l.joinToString(". ") { "Al ${if (it.entrar) "llegar a" else "salir de"} ${it.lugar}: ${it.texto}" } + ".")
+        }
+        if (f.tiene("(cancela|borra|elimina) (los |mis )?recordatorios (por|de) (lugar|ubicacion)")) return R("Cancelé ${Lugares.cancelarTodos(ctx)} recordatorios por lugar, $tr.")
+
+        // --- Antirrobo -------------------------------------------------------------------------
+        if (f.tiene("((activa|enciende|pon|prende)( el)? (modo )?antirrobo|vigila (mi|el|este) (celular|telefono)|cuida (mi|el) celular)")) {
+            return R("Modo antirrobo activado, $tr. Bloquee el celular y déjelo quieto. Si alguien lo mueve o lo desconecta del cargador, sonará una alarma. Se desactiva cuando usted lo desbloquee.", cerrar = true) { Antirrobo.armar(ctx) }
+        }
+        if (f.tiene("((desactiva|apaga|quita)( el)? (modo )?antirrobo)")) {
+            Antirrobo.desarmar(ctx)
+            return R("Antirrobo desactivado, $tr.")
+        }
+
+        // --- Tipo de cambio ------------------------------------------------------------------------
+        Regex("^(?:convierte|cambia|cuanto (?:es|son|serian)|a cuanto equivale(?:n)?)\\s+(\\d+(?:[.,]\\d+)?)\\s+(soles?|dolares?|euros?|pesos? \\w+|reales?|bolivianos?|libras?|yenes?|yuanes?)\\s+(?:a|en)\\s+(soles?|dolares?|euros?|pesos? \\w+|reales?|bolivianos?|libras?|yenes?|yuanes?)$").find(t)?.let { m ->
+            val monto = m.groupValues[1].replace(',', '.').toDouble()
+            val de = m.groupValues[2]; val a = m.groupValues[3]
+            return fondo(cb) {
+                try {
+                    fun soles(x: String): Double? = if (x.startsWith("sol")) 1.0 else Divisas.moneda(x)?.let { Divisas.enSoles(it.first) }
+                    val sd = soles(de); val sa = soles(a)
+                    if (sd == null || sa == null) return@fondo R("No conozco esa moneda, $tr.")
+                    val r = monto * sd / sa
+                    R("${Divisas.redondo(monto)} ${de} son unos ${Divisas.redondo(r)} ${a}, al cambio de hoy.")
+                } catch (_: Exception) { R("No pude consultar el tipo de cambio, $tr.") }
+            }
+        }
+        if (f.tiene("(tipo de cambio|a como esta|cuanto esta|precio del|cotizacion del|como esta el|valor del)") && Divisas.moneda(t) != null && !f.tiene("(madrid|partido|equipo|futbol)") || f.tiene("^(tipo de cambio|el dolar|dolar hoy)$")) {
+            val (cod, nom) = Divisas.moneda(t) ?: ("USD" to "dólar")
+            return fondo(cb) {
+                try {
+                    val v = Divisas.enSoles(cod)
+                    R("El $nom está a ${Divisas.redondo(v)} soles, $tr. Es el cambio de referencia; en las casas de cambio puede variar unos céntimos.")
+                } catch (_: Exception) { R("No pude consultar el tipo de cambio ahora, $tr.") }
+            }
+        }
+        return null
+    }
+
+    /** Entiende qué quiere hacer en la laptop. */
+    private fun pcOrden(f: Frase): Pair<String, String>? {
+        val t = f.t
+        val sinPc = Regex("\\s*(?:en|de|a|con)?\\s*(?:la|mi)?\\s*$rLaptop\\s*").replace(t, " ").trim()
+        return when {
+            f.tiene("cancela (el )?apagado") -> "cancelar" to ""
+            f.tiene("^(apaga|apagar)") -> "apagar" to ""
+            f.tiene("^(reinicia|reiniciar)") -> "reiniciar" to ""
+            f.tiene("^(suspende|hiberna|pon a dormir|duerme)") -> "suspender" to ""
+            f.tiene("^(bloquea|bloquear)") -> "bloquear" to ""
+            f.tiene("(bateria|carga)") -> "bateria" to ""
+            f.tiene("(esta (prendida|encendida)|estas conectad|funciona)") -> "estado" to ""
+            f.tiene("(silencia|mutea|quita el (sonido|volumen))") -> "volumen" to "silenciar"
+            f.tiene("volumen") && Regex("(\\d+)").find(t) != null -> "volumen" to Regex("(\\d+)").find(t)!!.groupValues[1]
+            f.tiene("sube (el )?(volumen|sonido)") -> "volumen" to "subir"
+            f.tiene("baja (el )?(volumen|sonido)") -> "volumen" to "bajar"
+            f.tiene("^(pausa|pausar|continua|reanuda|play)") -> "media" to "play"
+            f.tiene("^(siguiente|pasa la cancion|salta)") -> "media" to "siguiente"
+            f.tiene("^(anterior|regresa la cancion)") -> "media" to "anterior"
+            Regex("^(?:cierra|cerrar)\\s+(.+)$").find(sinPc) != null -> "cerrar" to Regex("^(?:cierra|cerrar)\\s+(.+)$").find(sinPc)!!.groupValues[1]
+            Regex("^(?:pon(?:me)?|reproduce|reproducir|toca)\\s+(.+)$").find(sinPc) != null -> "youtube" to Regex("^(?:pon(?:me)?|reproduce|reproducir|toca)\\s+(.+)$").find(sinPc)!!.groupValues[1].replace(Regex("\\s+en youtube$"), "")
+            Regex("^(?:busca|buscar|googlea)\\s+(.+)$").find(sinPc) != null -> "buscar" to Regex("^(?:busca|buscar|googlea)\\s+(.+)$").find(sinPc)!!.groupValues[1]
+            Regex("^(?:escribe|escribir|dicta)\\s+(.+)$").find(sinPc) != null -> "escribir" to f.original.replace(Regex("(?i)^.*?(escribe|escribir|dicta)\\s+"), "").replace(Regex("(?i)\\s+(en|de)\\s+(la|mi)\\s+(laptop|pc|computadora|compu)\\s*$"), "")
+            Regex("^(?:abre|abrir|inicia|ejecuta)\\s+(.+)$").find(sinPc) != null -> {
+                val app = Regex("^(?:abre|abrir|inicia|ejecuta)\\s+(.+)$").find(sinPc)!!.groupValues[1]
+                if (Regex("\\.(com|pe|org|net)").containsMatchIn(app)) "web" to app.replace(" punto ", ".").replace(" ", "") else "abrir" to app
+            }
+            else -> null
+        }
+    }
+
+    /** «Mañana a las 7 mándale a Juan: buenos días». */
+    private fun programado(f: Frase): Yarvis.Respuesta? {
+        val t = f.t
+        val m = Regex("^(.*?)\\b(?:mandale|enviale|escribele|programa(?:me)? un (?:mensaje|whatsapp|sms)|manda(?:me)? un (?:mensaje|whatsapp|sms)|envia(?:me)? un (?:mensaje|whatsapp|sms))\\s+(?:a |para )?(.+?)\\s+(?:que dice|que diga|que|diciendo(?:le)?(?: que)?|:)\\s+(.+)$").find(t) ?: return null
+        val antes = m.groupValues[1] + " " + m.groupValues[2]
+        val momento = Tiempo.analizar(antes) ?: (if (t.contains("programa")) Tiempo.analizar(t) else null) ?: return null
+        if (!momento.conHora && !momento.conDia) return null
+        if (momento.cal.timeInMillis < System.currentTimeMillis() + 60_000) return null
+        // Nombre sin las palabras de tiempo
+        val nombreCrudo = m.groupValues[2]
+        val mt = Tiempo.analizar(nombreCrudo)
+        var nombre = nombreCrudo
+        mt?.rangos?.sortedByDescending { it.first }?.forEach { r -> if (r.last < nombre.length) nombre = nombre.removeRange(r) }
+        nombre = nombre.replace(Regex("\\b(a las|para las|a la|el|hoy|manana|pasado)\\b"), " ").replace(Regex("\\s+"), " ").trim()
+        val c = Contactos.buscar(ctx, nombre)
+        val quien = c?.nombre ?: nombre.split(" ").joinToString(" ") { it.replaceFirstChar { ch -> ch.uppercase() } }
+        var texto = f.originalDeGrupo(m, 3).trim()
+        if (t.contains("programa") && Tiempo.analizar(antes) == null) {
+            // la hora venía al final del texto: la quitamos del mensaje
+            Tiempo.analizar(m.groupValues[3])?.rangos?.sortedByDescending { it.first }?.forEach { r -> if (r.last < texto.length) texto = texto.removeRange(r).trim() }
+        }
+        val sms = f.tiene("(sms|mensaje de texto)")
+        val cuando = momento.cal
+        return esperar("Le enviaré a $quien ${Tiempo.describir(cuando)}: «${texto.replaceFirstChar { it.uppercase() }}». ¿Lo programo?") { f2 ->
+            if (!rSiGeneral.containsMatchIn(f2.t) && !f2.tiene("^(programalo|programa|dale)")) return@esperar R("No lo programé, $tr.", cerrar = true)
+            Programados.crear(ctx, quien, texto.replaceFirstChar { it.uppercase() }, cuando.timeInMillis, sms)
+            R("Programado, $tr. Lo enviaré ${Tiempo.describir(cuando)}.", cerrar = true)
+        }
+    }
+
+    /** Envía un mensaje programado a su hora. Devuelve qué pasó (para la notificación). */
+    fun enviarProgramado(quien: String, texto: String, sms: Boolean): String {
+        val c = resolverContacto(quien) ?: return "No encontré a $quien en sus contactos para enviarle: «$texto»"
+        return enviarMensaje(c, texto, sms).texto
+    }
+
+    /** ¿Le mando un saludo de cumpleaños? */
+    fun decidirSaludo(nombre: String, f: Frase): Yarvis.Respuesta? {
+        if (f.tiene("^(no|despues|luego|ahora no|dejalo)\\b")) return R("De acuerdo, $tr.", cerrar = true)
+        val propio = Regex("^(?:si,? )?(?:dile|ponle|escribele)(?: que)?\\s+(.+)$").find(f.t)
+        if (propio == null && !rSiGeneral.containsMatchIn(f.t)) return null
+        val c = resolverContacto(nombre) ?: return R("No encontré a $nombre en sus contactos, $tr.")
+        if (propio != null) return enviarMensaje(c, f.originalDeGrupo(propio, 1), porSms = false)
+        Thread {
+            val saludo = Cumpleanos.redactarSaludo(c.nombre)
+            val rDile = Regex("^(?:mejor |no,? )?(?:dile|ponle|escribele)(?: que)?\\s+(.+)$")
+            Yarvis.decirYEscuchar(esperar("Le escribo a ${c.nombre}: «$saludo». ¿Lo envío?") { f2 ->
+                val otro = rDile.find(f2.t)
+                when {
+                    f2.tiene("^(no|cancela|dejalo)\\b") && otro == null -> R("No lo envié, $tr.", cerrar = true)
+                    otro != null -> enviarMensaje(c, f2.originalDeGrupo(otro, 1), porSms = false)
+                    rSiGeneral.containsMatchIn(f2.t) || f2.tiene("^(envia|envialo|mandalo)") -> enviarMensaje(c, saludo, porSms = false)
+                    else -> R("No lo envié, $tr.", cerrar = true)
+                }
+            })
+        }.start()
+        return R("Un momento, le escribo el saludo…", cerrar = true)
+    }
+
+    // =====================================================================
     //  Funciones nuevas (v3.1)
     // =====================================================================
 
@@ -863,6 +1148,10 @@ class Cerebro(private val ctx: Context) {
                 .map { "${SimpleDateFormat("h:mm a", es).format(Date(it.cuando))}, ${it.texto}" }
             val todo = ev + rec
             partes.add(if (todo.isEmpty()) "No tiene nada en su agenda para hoy." else "En su agenda de hoy: ${todo.joinToString(". ")}.")
+        } catch (_: Exception) {}
+        try {
+            val cumples = Cumpleanos.deHoy(ctx)
+            if (cumples.isNotEmpty()) partes.add("Hoy cumple años ${cumples.joinToString(" y ") { it.nombre }}; si quiere, le mando un saludo.")
         } catch (_: Exception) {}
         try {
             val noche = Calendar.getInstance().apply { add(Calendar.HOUR_OF_DAY, -12) }.timeInMillis

@@ -35,7 +35,8 @@ object Localizador {
     private const val ID_NOTIF = 4100
     const val ACCION_PARAR = "com.velkyra.yarvis.PARAR_LOCALIZADOR"
 
-    fun sonar(ctx: Context = Yarvis.ctx) {
+    /** [antirrobo] = solo se detiene al desbloquear el celular (no al encender la pantalla) y dura 3 minutos. */
+    fun sonar(ctx: Context = Yarvis.ctx, antirrobo: Boolean = false) {
         if (sonando) return
         sonando = true
         val am = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -65,12 +66,11 @@ object Localizador {
         try {
             ctx.registerReceiver(receptor, IntentFilter().apply {
                 addAction(Intent.ACTION_USER_PRESENT)
-                addAction(Intent.ACTION_SCREEN_ON)
-                addAction(ACCION_PARAR)
+                if (!antirrobo) { addAction(Intent.ACTION_SCREEN_ON); addAction(ACCION_PARAR) }
             }, Context.RECEIVER_NOT_EXPORTED)
         } catch (_: Exception) {}
-        notificar(ctx)
-        principal.postDelayed({ parar(ctx) }, 60_000)
+        if (!antirrobo) notificar(ctx)
+        principal.postDelayed({ parar(ctx) }, if (antirrobo) 180_000 else 60_000)
     }
 
     private fun parpadear(ctx: Context) {

@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <!-- «¿Qué ves?» con la cámara -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Recordatorios por lugar («cuando llegue a Juliaca…») -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <!-- Agenda, alarmas y recordatorios -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
@@ -87,6 +89,7 @@
     <application
         android:name=".App"
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
@@ -151,6 +154,22 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 
         <activity
+            android:name=".CompartirActivity"
+            android:exported="true"
+            android:label="ODÍN: transcribir o resumir"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/ogg" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".ComandosActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
@@ -195,5 +214,26 @@
         <receiver
             android:name=".ReceptorRecordatorio"
             android:exported="false" />
+        <receiver android:name=".ReceptorProgramado" android:exported="false" />
+        <receiver android:name=".ReceptorCumpleanos" android:exported="false" />
+        <receiver android:name=".ReceptorLugar" android:exported="false" />
+
+        <receiver android:name=".OdinWidget" android:exported="true" android:label="ODÍN">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_odin" />
+        </receiver>
+
+        <service
+            android:name=".TileOdin"
+            android:exported="true"
+            android:icon="@drawable/ic_launcher_foreground"
+            android:label="ODÍN"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

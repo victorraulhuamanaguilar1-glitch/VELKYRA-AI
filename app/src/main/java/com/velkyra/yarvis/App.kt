@@ -27,6 +27,8 @@ class App : Application() {
         android.os.Handler(mainLooper).postDelayed({ ServicioNotificaciones.reconectar(this) }, 3000)
         // Copia de seguridad automática (una vez al día, en Descargas/ODIN)
         android.os.Handler(mainLooper).postDelayed({ Respaldo.automatico(this) }, 15000)
+        // Aviso diario de cumpleaños (8:05 a. m.)
+        try { if (Prefs.configurado) Cumpleanos.programar(this) } catch (_: Exception) {}
     }
 
     companion object {

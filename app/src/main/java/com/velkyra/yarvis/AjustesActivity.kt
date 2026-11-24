@@ -250,6 +250,9 @@ class AjustesActivity : Base() {
         }
         filaModos.addView(chipsModos)
         secModos.agregar(filaModos, arriba = dp(8))
+        secModos.agregar(interruptor("Modo antirrobo", "Con el celular bloqueado, si lo mueven o desconectan el cargador suena una alarma. Se apaga al desbloquearlo.", Antirrobo.armado) {
+            if (it) Antirrobo.armar(this) else Antirrobo.desarmar(this)
+        }, arriba = dp(10))
         secModos.agregar(interruptor("Encontrarme con dos aplausos", "Si no encuentra el celular, aplauda dos veces y sonaré fuerte. Solo con la pantalla apagada.", Prefs.aplausos) {
             Prefs.aplausos = it
             if (it) Prefs.modoEscucha = "siempre"
@@ -281,6 +284,32 @@ class AjustesActivity : Base() {
             }.start()
         }, arriba = dp(8))
         if (Correo.configurado) co.agregar(boton("DESCONECTAR GMAIL", false) { Prefs.correoUsuario = ""; Prefs.correoClave = ""; dibujar() }, arriba = dp(8))
+
+        // MI LAPTOP (VELKYRA PC Link)
+        val pc = seccion("Mi laptop")
+        pc.addView(estadoPermiso(PcLink.conectada, "Conectada: ${PcLink.nombre}", "Laptop sin conectar") {})
+        pc.agregar(texto("Controle su laptop por voz («apaga la laptop», «pon música en la laptop», «abre Word en la laptop»).\n1. En la laptop, descargue y abra VELKYRA PC Link (cuando Windows pregunte, toque «Permitir acceso»).\n2. Con el celular en el mismo wifi, diga «Odín, conecta con mi laptop» o escriba aquí el código que muestra.", 14f, Ui.TEXTO_SUAVE), arriba = dp(4))
+        pc.agregar(boton("COPIAR ENLACE DE DESCARGA PARA LA LAPTOP", false) {
+            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("VELKYRA PC Link", PcLink.DESCARGA))
+            android.widget.Toast.makeText(this, "Enlace copiado. Envíeselo a la laptop (por WhatsApp Web o correo).", android.widget.Toast.LENGTH_LONG).show()
+        }, arriba = dp(8))
+        val cPin = campo("Código de 6 números", "").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        pc.agregar(cPin, arriba = dp(8))
+        pc.agregar(boton("BUSCAR Y CONECTAR", true) {
+            val pin = cPin.text.toString().filter { it.isDigit() }
+            if (pin.length != 6) { android.widget.Toast.makeText(this, "Escriba el código de 6 números que muestra la laptop", android.widget.Toast.LENGTH_LONG).show(); return@boton }
+            android.widget.Toast.makeText(this, "Buscando la laptop en el wifi…", android.widget.Toast.LENGTH_SHORT).show()
+            Thread {
+                val enc = PcLink.buscar()
+                val err = if (enc == null) "No encontré la laptop. Revise que VELKYRA PC Link esté abierto y en el mismo wifi." else PcLink.emparejar(enc.first, enc.second, pin)
+                runOnUiThread {
+                    Voz.hablar(err ?: "Listo. Ya controlo ${PcLink.nombre}.")
+                    android.widget.Toast.makeText(this, err ?: "✓ Laptop conectada", android.widget.Toast.LENGTH_LONG).show()
+                    dibujar()
+                }
+            }.start()
+        }, arriba = dp(8))
+        if (PcLink.conectada) pc.agregar(boton("DESCONECTAR LAPTOP", false) { PcLink.desconectar(); dibujar() }, arriba = dp(8))
 
         // PERMISOS
         val per = seccion("Permisos")

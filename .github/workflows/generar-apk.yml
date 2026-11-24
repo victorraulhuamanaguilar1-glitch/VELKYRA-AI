@@ -109,3 +109,22 @@ jobs:
           git add -f build.log modelo.txt estado.txt 2>/dev/null || true
           git commit -qm "Registro run ${{ github.run_number }}" || true
           git push -f origin registros || true
+
+  pc:
+    # Programa para Windows: VELKYRA PC Link (controlar la laptop con ODÍN)
+    needs: apk
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Crear VELKYRA_PC_Link.exe
+        run: |
+          python -m pip install --upgrade pip pyinstaller
+          pyinstaller --onefile --noconsole --name VELKYRA_PC_Link pc/velkyra_pc_link.py
+      - name: Publicar junto al APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.0.${{ github.run_number }}
+          files: dist/VELKYRA_PC_Link.exe

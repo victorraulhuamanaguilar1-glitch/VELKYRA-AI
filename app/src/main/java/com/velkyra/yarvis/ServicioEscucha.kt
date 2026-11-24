@@ -158,6 +158,7 @@ class ServicioEscucha : Service() {
 
     private val receptorPantalla = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            if (i.action == Intent.ACTION_USER_PRESENT) { try { Programados.alDesbloquear(c) } catch (_: Exception) {}; return }
             pantallaEncendida = i.action != Intent.ACTION_SCREEN_OFF
             revisar()
         }
@@ -176,6 +177,7 @@ class ServicioEscucha : Service() {
         registerReceiver(receptorPantalla, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         })
         cargarModelo()
         principal.postDelayed(vigia, 4000)
@@ -189,7 +191,7 @@ class ServicioEscucha : Service() {
             try {
                 val c = captura
                 // Solo reabre el micrófono si se cayó; nunca reinicia uno que está funcionando
-                if (c == null && !pausado && modelo != null && Prefs.escuchaActiva) revisar()
+                if (c == null && !pausado && modelo != null && (Prefs.escuchaActiva || Grabadora.activa)) revisar()
             } catch (_: Exception) {}
             principal.postDelayed(this, 3000)
         }
@@ -227,8 +229,9 @@ class ServicioEscucha : Service() {
     fun detenerParaReinicio() = detenerEscucha()
 
     fun revisar() {
-        val debe = modelo != null && !pausado && Prefs.escuchaActiva &&
-            (Prefs.modoEscucha == "siempre" || pantallaEncendida) &&
+        // Mientras graba una reunión, el micrófono sigue abierto aunque la pantalla esté apagada
+        val debe = modelo != null && !pausado && (Grabadora.activa || (Prefs.escuchaActiva &&
+            (Prefs.modoEscucha == "siempre" || pantallaEncendida))) &&
             tiene(Manifest.permission.RECORD_AUDIO)
         if (debe) iniciarEscucha() else detenerEscucha()
         actualizarNotificacion()
@@ -250,7 +253,11 @@ class ServicioEscucha : Service() {
             val aplausos = if (Prefs.aplausos) DetectorAplausos {
                 if (!pantallaEncendida && !Medios.sonando() && !Localizador.sonando) principal.post { Localizador.sonar(this) }
             } else null
-            captura = Captura(rec, false, alAudio = aplausos?.let { d -> { b: ShortArray, n: Int -> if (!pantallaEncendida) d.procesar(b, n) } }, alMorir = { principal.post { detenerEscucha(); principal.postDelayed({ revisar() }, 1500) } }) { json, c -> revisarTexto(json, c) }
+            val alAudio = { b: ShortArray, n: Int ->
+                if (Grabadora.activa) Grabadora.escribir(b, n)
+                if (aplausos != null && !pantallaEncendida) aplausos.procesar(b, n)
+            }
+            captura = Captura(rec, false, alAudio = alAudio, alMorir = { principal.post { detenerEscucha(); principal.postDelayed({ revisar() }, 1500) } }) { json, c -> revisarTexto(json, c) }
         } catch (e: Exception) {
             detenerEscucha()
             principal.postDelayed({ revisar() }, 3000)
@@ -336,6 +343,9 @@ class ServicioEscucha : Service() {
         )
         val texto = when {
             cargando -> "Preparando el reconocimiento de voz…"
+            Grabadora.activa -> "🔴 Grabando la reunión. Diga «${Prefs.palabraActivacion}, termina la grabación» para hacer el acta."
+            Antirrobo.armado -> "🛡️ Modo antirrobo activado."
+            Modos.actual != Modos.NORMAL && captura != null -> "${Modos.nombre().replaceFirstChar { it.uppercase() }} · Diga «${Prefs.palabraActivacion}» para activarme."
             !activa -> "Escucha en pausa. Toque «Reanudar» para activarla."
             modelo == null -> "No se pudo cargar el modelo de voz."
             captura != null -> "Diga «${Prefs.palabraActivacion}» para activarme." + if (Prefs.verificarVoz && VozDueno.hayDueno()) " Solo atiendo su voz." else ""
@@ -449,6 +459,7 @@ class ReceptorArranque : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (!Prefs.configurado) return
         Recordatorios.reprogramarTodos(ctx)
+        try { Programados.reprogramarTodos(ctx); Lugares.reprogramarTodos(ctx); Cumpleanos.programar(ctx) } catch (_: Exception) {}
         if (Prefs.escuchaActiva && !ServicioEscucha.iniciar(ctx)) Avisos.pedirActivacion(ctx)
     }
 }

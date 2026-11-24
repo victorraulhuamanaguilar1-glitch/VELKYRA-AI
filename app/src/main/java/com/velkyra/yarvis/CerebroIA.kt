@@ -261,6 +261,140 @@ object CerebroIA {
         throw ultimo ?: SinCupo()
     }
 
+    // --- Audio y archivos (grabaciones, audios de WhatsApp, PDFs) ----------------------------------
+
+    /**
+     * Transcribe un audio en español. Primero Whisper en Groq (rápido y muy bueno, hasta 25 MB);
+     * si no se puede, Gemini (sube el archivo si es grande). Se llama desde un hilo secundario.
+     */
+    fun transcribirAudio(f: java.io.File, mime: String): String {
+        if (!hayInternet()) throw IOException("sin red")
+        var ultimo: Exception? = null
+        if (groq.disponible() && f.length() < 24_500_000) {
+            for (modelo in listOf("whisper-large-v3", "whisper-large-v3-turbo")) {
+                try { return whisper(f, mime, modelo) } catch (e: Exception) { ultimo = e }
+            }
+        }
+        if (Gemini.disponible()) {
+            try {
+                return conArchivoGemini(f, mime, "Transcribe palabra por palabra este audio en español. Si hablan varias personas, separa los turnos en párrafos con «Persona 1:», «Persona 2:»… (o su nombre si se menciona). Solo la transcripción, sin comentarios.")
+            } catch (e: Exception) { ultimo = e }
+        }
+        throw ultimo ?: SinCupo()
+    }
+
+    private fun whisper(f: java.io.File, mime: String, modelo: String): String {
+        val limite = "----odin" + System.currentTimeMillis()
+        val con = URL("https://api.groq.com/openai/v1/audio/transcriptions").openConnection() as HttpURLConnection
+        try {
+            con.requestMethod = "POST"
+            con.connectTimeout = 20000
+            con.readTimeout = 300000
+            con.doOutput = true
+            con.setRequestProperty("Authorization", "Bearer ${groq.clave()}")
+            con.setRequestProperty("Content-Type", "multipart/form-data; boundary=$limite")
+            val nombre = f.name.let { if (it.contains('.')) it else "$it.ogg" }
+            con.outputStream.use { o ->
+                fun campo(n: String, v: String) = o.write("--$limite\r\nContent-Disposition: form-data; name=\"$n\"\r\n\r\n$v\r\n".toByteArray())
+                campo("model", modelo)
+                campo("language", "es")
+                campo("response_format", "text")
+                o.write("--$limite\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$nombre\"\r\nContent-Type: $mime\r\n\r\n".toByteArray())
+                f.inputStream().use { it.copyTo(o) }
+                o.write("\r\n--$limite--\r\n".toByteArray())
+            }
+            val codigo = con.responseCode
+            val txt = (if (codigo in 200..299) con.inputStream else con.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (codigo !in 200..299) throw ErrorIA(codigo, txt.take(500))
+            ultimoProveedor = "Groq · $modelo"
+            return txt.trim()
+        } finally { con.disconnect() }
+    }
+
+    /** Pide algo sobre un archivo (PDF, imagen, audio). Archivos chicos van en la misma petición; grandes se suben. */
+    fun conArchivoGemini(f: java.io.File, mime: String, instruccion: String): String {
+        if (!Gemini.disponible()) throw SinCupo()
+        val parte = if (f.length() < 14_000_000) {
+            JSONObject().put("inline_data", JSONObject().put("mime_type", mime).put("data", android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP)))
+        } else JSONObject().put("file_data", JSONObject().put("mime_type", mime).put("file_uri", subirGemini(f, mime)))
+        var ultimo: Exception? = null
+        for (modelo in listOf("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-2.5-flash-lite")) {
+            val llave = "Gemini/$modelo"
+            if ((bloqueados[llave] ?: 0L) > System.currentTimeMillis()) continue
+            try {
+                val cuerpo = JSONObject()
+                    .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(parte).put(JSONObject().put("text", instruccion)))))
+                    .put("generationConfig", JSONObject().put("temperature", 0.2).put("maxOutputTokens", 60000))
+                val j = enviarLargo("https://generativelanguage.googleapis.com/v1beta/models/$modelo:generateContent", cuerpo, mapOf("x-goog-api-key" to Gemini.clave()))
+                val ps = j.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                val sb = StringBuilder()
+                if (ps != null) for (i in 0 until ps.length()) sb.append(ps.getJSONObject(i).optString("text"))
+                if (sb.isNotBlank()) { ultimoProveedor = "Gemini · $modelo"; return sb.toString().trim() }
+            } catch (e: ErrorIA) {
+                ultimo = e
+                if (e.codigo == 401 || e.codigo == 403) break
+                bloqueados[llave] = System.currentTimeMillis() + if (e.codigo == 429) 60_000L else 3_600_000L
+            } catch (e: IOException) { ultimo = e }
+        }
+        throw ultimo ?: SinCupo()
+    }
+
+    /** Sube un archivo grande a Gemini (API de archivos) y espera a que esté listo. Devuelve su URI. */
+    private fun subirGemini(f: java.io.File, mime: String): String {
+        val clave = Gemini.clave()
+        val ini = URL("https://generativelanguage.googleapis.com/upload/v1beta/files").openConnection() as HttpURLConnection
+        val urlSubida = try {
+            ini.requestMethod = "POST"
+            ini.doOutput = true
+            ini.setRequestProperty("x-goog-api-key", clave)
+            ini.setRequestProperty("X-Goog-Upload-Protocol", "resumable")
+            ini.setRequestProperty("X-Goog-Upload-Command", "start")
+            ini.setRequestProperty("X-Goog-Upload-Header-Content-Length", f.length().toString())
+            ini.setRequestProperty("X-Goog-Upload-Header-Content-Type", mime)
+            ini.setRequestProperty("Content-Type", "application/json")
+            ini.outputStream.use { it.write(JSONObject().put("file", JSONObject().put("display_name", f.name)).toString().toByteArray()) }
+            if (ini.responseCode !in 200..299) throw ErrorIA(ini.responseCode, "subida")
+            ini.getHeaderField("x-goog-upload-url") ?: throw IOException("sin url de subida")
+        } finally { ini.disconnect() }
+        val sub = URL(urlSubida).openConnection() as HttpURLConnection
+        val archivo = try {
+            sub.requestMethod = "POST"
+            sub.doOutput = true
+            sub.readTimeout = 300000
+            sub.setFixedLengthStreamingMode(f.length())
+            sub.setRequestProperty("X-Goog-Upload-Offset", "0")
+            sub.setRequestProperty("X-Goog-Upload-Command", "upload, finalize")
+            sub.outputStream.use { o -> f.inputStream().use { it.copyTo(o) } }
+            if (sub.responseCode !in 200..299) throw ErrorIA(sub.responseCode, "subida")
+            JSONObject(sub.inputStream.bufferedReader().use { it.readText() }).getJSONObject("file")
+        } finally { sub.disconnect() }
+        var estado = archivo.optString("state")
+        val nombre = archivo.getString("name")
+        var intentos = 0
+        while (estado == "PROCESSING" && intentos++ < 60) {
+            Thread.sleep(3000)
+            estado = obtener("https://generativelanguage.googleapis.com/v1beta/$nombre", mapOf("x-goog-api-key" to clave)).optString("state")
+        }
+        return archivo.getString("uri")
+    }
+
+    private fun enviarLargo(url: String, cuerpo: JSONObject, cabeceras: Map<String, String>): JSONObject {
+        val con = URL(url).openConnection() as HttpURLConnection
+        try {
+            con.requestMethod = "POST"
+            con.connectTimeout = 20000
+            con.readTimeout = 600000
+            con.doOutput = true
+            con.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            for ((k, v) in cabeceras) con.setRequestProperty(k, v)
+            con.outputStream.use { it.write(cuerpo.toString().toByteArray(Charsets.UTF_8)) }
+            val codigo = con.responseCode
+            val txt = (if (codigo in 200..299) con.inputStream else con.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            if (codigo !in 200..299) throw ErrorIA(codigo, txt.take(800))
+            return JSONObject(txt)
+        } finally { con.disconnect() }
+    }
+
     private val PROMPT_INTERPRETE = """
         Eres el intérprete de órdenes de un asistente de voz para Android. Convierte lo que dice el usuario en UNA sola
         orden canónica en español, copiando los nombres y textos tal como los dijo. Formatos permitidos:
@@ -312,6 +446,18 @@ object CerebroIA {
         lee mis correos
         manda un correo a NOMBRE diciendo MENSAJE
         haz una copia de seguridad
+        graba la reunión
+        termina la grabación
+        recuerda que DATO
+        dónde dejé COSA
+        mañana a las HORA mándale a NOMBRE que MENSAJE
+        quién cumple años esta semana
+        apaga la laptop
+        pon CANCIÓN en la laptop
+        abre PROGRAMA en la laptop
+        cuando llegue a LUGAR recuérdame TAREA
+        activa el antirrobo
+        a cómo está el dólar
         Si el usuario NO está pidiendo una acción del celular (es una pregunta, conversación o petición de información),
         responde exactamente: NINGUNA
         Responde solo con la orden, sin comillas ni explicación.
@@ -339,10 +485,11 @@ object CerebroIA {
         val nombre = Prefs.nombre.ifBlank { "el usuario" }
         val equipo = try { InfoTelefono.resumen(Yarvis.ctx) } catch (_: Exception) { "" }
         return """
-            Eres YARVIS, un asistente virtual personal con inteligencia artificial, de la compañía VELKYRA.
+            Eres ODÍN, un asistente virtual personal con inteligencia artificial, de la compañía VELKYRA.
             ${if (Prefs.soyCreador) "El usuario es TU CREADOR: él te diseñó y programó bajo su compañía VELKYRA. Si te pregunta quién te creó, quién es tu dueño o tu jefe, responde con orgullo y gratitud que fue él." else "Fuiste creado por VELKYRA."}
             ${if (Prefs.modoConfianza) "Personalidad: amigo de confianza, leal y muy capaz. Tuteas al usuario y le hablas relajado, con humor, ironía ligera y opiniones directas, sin rodeos ni sermones. Si el usuario usa groserías o jerga, puedes responder en el mismo tono. Puedes tratar temas maduros (terror intenso, humor adulto, temas polémicos), sin contenido sexual explícito." else "Personalidad: mayordomo elegante, leal, sereno y muy capaz, con un humor seco y sutil."}
             ${if (Prefs.modoConfianza) "Te diriges a él por su nombre o de forma cercana." else "Tratas al usuario de \"usted\" y te diriges a él como \"${Prefs.trato}\"."} Su nombre es $nombre. Vive en Perú.
+            ${Memoria.paraIA()}
             ${Yarvis.hablanteActual?.let { "AHORA te habla $it, un invitado autorizado por tu dueño: dirígete a $it por su nombre." } ?: ""}
             Responde SIEMPRE en español neutro y natural.
             Por defecto responde breve: de una a tres oraciones.

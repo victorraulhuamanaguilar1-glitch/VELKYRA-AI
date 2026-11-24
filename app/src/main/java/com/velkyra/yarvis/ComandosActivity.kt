@@ -23,6 +23,10 @@ class ComandosActivity : Base() {
         "Modos" to listOf("Modo manejo", "Modo dormir", "Modo reunión", "Modo normal"),
         "Gastos" to listOf("Gasté 20 soles en pasajes", "Me pagaron 500 soles por el trabajo", "¿Cuánto gasté esta semana?", "¿Cuánto gasté en comida este mes?", "Borra el último gasto"),
         "Encontrar el celular y copias" to listOf("¿Dónde estás?", "Activa los aplausos", "Haz una copia de seguridad"),
+        "Reuniones y memoria" to listOf("Graba la reunión", "Termina la grabación", "Comparte el acta", "Recuerda que dejé las llaves en el cajón", "¿Dónde dejé las llaves?", "¿Qué te pedí recordar?"),
+        "Mensajes programados y cumpleaños" to listOf("Mañana a las 7 mándale a Juan que buenos días", "Mis mensajes programados", "¿Quién cumple años esta semana?", "El cumpleaños de Juan es el 5 de mayo"),
+        "Mi laptop" to listOf("Conecta con mi laptop", "Pon música andina en la laptop", "Abre Word en la laptop", "Sube el volumen de la laptop", "Apaga la laptop", "Cancela el apagado"),
+        "Lugares, seguridad y dinero" to listOf("Cuando llegue a Juliaca recuérdame comprar tinta", "Guarda este lugar como mi casa", "Activa el antirrobo", "¿A cómo está el dólar?", "Convierte 100 dólares a soles"),
         "Control de ODÍN" to listOf("Deja de escuchar", "Activa la escucha", "Cancela", "Adiós")
     )
 
